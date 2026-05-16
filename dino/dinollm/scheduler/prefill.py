@@ -9,7 +9,6 @@ from dinollm.utils import init_logger
 
 from .utils import PendingReq
 
-# 类型导入，不运行
 if TYPE_CHECKING:
     from dinollm.kvcache import BaseCacheHandle
     from dinollm.message import UserMsg

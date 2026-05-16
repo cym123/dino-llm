@@ -4,50 +4,31 @@ from datetime import timedelta
 from typing import Any, Dict, NamedTuple, Tuple
 
 import torch
-# 注意力后端（flash/flashinfer/trtllm）
 from dinollm.attention import create_attention_backend
-# 核心调度：请求、批次、上下文
 from dinollm.core import Batch, Context, Req, set_global_ctx
-# 分布式通信（你之前学的多卡通信）
 from dinollm.distributed import destroy_distributed, enable_pynccl_distributed, set_tp_info
-# KV Cache 池管理（PagedAttention 核心）
 from dinollm.kvcache import create_kvcache_pool
-# RoPE 位置编码
 from dinollm.layers import set_rope_device
-# 模型创建 & 权重加载
 from dinollm.models import create_model, load_weight
-# MoE 模型后端
 from dinollm.moe import create_moe_backend
-# 工具函数
 from dinollm.utils import div_even, init_logger, is_sm90_supported, is_sm100_supported, torch_dtype
 
-# 引擎配置类（你上一段学的 EngineConfig）
 from .config import EngineConfig
-# CUDA Graph 加速
 from .graph import GraphRunner, get_free_memory, mem_GB
-# 采样器（生成 next token）
 from .sample import BatchSamplingArgs, Sampler
 
-# 日志初始化
+
 logger = init_logger(__name__)
 
 
 class ForwardOutput(NamedTuple):
-    """
-    模型前向传播的输出结构
-    包含:GPU上的下一个token、CPU上的下一个token、拷贝完成事件
-    """
     next_tokens_gpu: torch.Tensor
     next_tokens_cpu: torch.Tensor
     copy_done_event: torch.cuda.Event
 
 
 class Engine:
-    """
-    【LLM 推理引擎核心类】
-    整个大模型推理的总控制器：
-    初始化模型、显存、多卡、KV Cache、调度批次、生成token
-    """
+
     def __init__(self, config: EngineConfig):
         # 安全检查：CUDA 不能提前初始化
         assert not torch.cuda.is_initialized()
@@ -192,10 +173,7 @@ class Engine:
         )
 
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
-        """
-        初始化多卡通信
-        支持：PyTorch原生 + PyNCCL高速通信
-        """
+   
         if config.tp_info.size == 1 or config.use_pynccl:
             # 初始化CPU通信组（gloo后端）
             torch.distributed.init_process_group(
@@ -237,10 +215,7 @@ class Engine:
             return {k: v.to(self.dtype) for k, v in load_weight(config.model_path, self.device)}
 
     def _determine_num_pages(self, old_free_memory: int, config: EngineConfig) -> int:
-        """
-        自动计算KV Cache能分配多少页
-        根据剩余显存自动计算，保证不爆显存
-        """
+    
         new_free_memory = self._sync_get_memory()[1]
         # 计算每个KV块占用的显存
         cache_per_page = (
@@ -268,10 +243,7 @@ class Engine:
         return num_pages
 
     def _sync_get_memory(self) -> Tuple[int, int]:
-        """
-        同步所有卡的空闲显存
-        保证多卡显存均衡，不出现OOM
-        """
+      
         torch.cuda.synchronize(self.device)
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(self.device)
@@ -291,13 +263,7 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
-        """
-        【核心推理函数】
-        执行一个批次的推理：
-        1. 运行模型前向
-        2. CUDA Graph加速
-        3. 采样生成token
-        """
+   
         # 必须使用引擎内部的CUDA流
         assert torch.cuda.current_stream() == self.stream
         # 进入批次上下文
@@ -330,17 +296,11 @@ class Engine:
 
 
 def _align_up_32(num: int) -> int:
-    """把数字向上对齐到32的倍数（硬件加速要求）"""
     return (num + 31) // 32 * 32
 
 
 def _adjust_config(config: EngineConfig):
-    """
-    自动调整引擎配置
-    1. 自动选择最优attention后端
-    2. TRTLLM强制page_size=64
-    3. MoE自动选择后端
-    """
+
     def override(attr: str, value: Any):
         object.__setattr__(config, attr, value)
 

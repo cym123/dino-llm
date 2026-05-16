@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 import torch
-# 获取张量并行（多卡）信息
 from dinollm.distributed import get_tp_info
-# 工具函数：均匀除法（分给多张卡）
 from dinollm.utils import div_even
 
-# 继承基类（规则手册）
+
 from .base import BaseKVCachePool
 
 
-# ======================================================
-# MHAKVCache = 标准注意力的 KV 缓存实现
-# 作用：一次性开辟一大块GPU显存，给所有层、所有token存 K 和 V
-# ======================================================
+
 class MHAKVCache(BaseKVCachePool):
 
 
