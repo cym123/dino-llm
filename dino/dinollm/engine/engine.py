@@ -304,18 +304,13 @@ def _adjust_config(config: EngineConfig):
     def override(attr: str, value: Any):
         object.__setattr__(config, attr, value)
 
-    # 自动选择attention后端
+
     if config.attention_backend == "auto":
-        backend = "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
+        backend = "fa,fi" if is_sm90_supported() else "fi"
         override("attention_backend", backend)
         logger.info_rank0(f"自动选择attention后端: {config.attention_backend}")
 
-    # TRTLLM要求page_size必须是16/32/64，默认覆盖为64
-    if "trtllm" in config.attention_backend and config.page_size not in [16, 32, 64]:
-        override("page_size", 64)
-        logger.warning_rank0("TRTLLM后端强制page_size=64")
 
-    # MoE模型自动选择fused后端
     if config.model_config.is_moe and config.moe_backend == "auto":
         override("moe_backend", "fused")
         logger.info_rank0(f"自动选择MoE后端: {config.moe_backend}")
