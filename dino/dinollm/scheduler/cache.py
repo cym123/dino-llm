@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, List, Tuple
+
+import torch
+from dinollm.core import Req
+from dinollm.kvcache import BaseCacheHandle, MatchResult, create_prefix_cache
+from dinollm.utils import div_ceil
+
+if TYPE_CHECKING:
+    from .utils import PendingReq
+
+
+# =========================================================
+# 【核心类】CacheManager：缓存管理器
+# 负责三件事：
+# 1. KV 显存页管理（分配/释放）
+# 2. 前缀缓存匹配（Radix树）
+# 3. 页表写入（PagedAttention）
+# =========================================================
+class CacheManager:
+    def __init__(
+        self,
+        num_pages: int,    # 总共有多少个显存页
+        page_size: int,    # 每页存多少个 token
+        page_table: torch.Tensor,  # 页表：请求ID → 显存位置
+        type: str          # 缓存类型：radix / naive
+    ):
+        device = page_table.device
+        # 空闲槽位：按页对齐 [0, page_size, 2*page_size, ...]
+        self.free_slots = torch.arange(num_pages, dtype=torch.int32, device=device) * page_size
+        # 创建前缀缓存（Radix树）
+        self.prefix_cache = create_prefix_cache(device=device, type=type)
+        self.device = device
+        self.num_pages = num_pages        # 总页数
+        self.page_table = page_table      # 页表
+        self.page_size = page_size        # 页大小
+
+    # 匹配请求前缀：查有没有缓存
+    def match_req(self, req: PendingReq) -> MatchResult:
+        input_len = req.input_len
+        assert input_len > 0, "Input length must be greater than 0."
+        # 匹配前缀（去掉最后一个token，因为是要预测的）
+        return self.prefix_cache.match_prefix(req.input_ids[: input_len - 1])
+
+    # 可用空间 = 可释放缓存 + 空闲页
+    @property
+    def available_size(self) -> int:
+        return self.prefix_cache.size_info.evictable_size + len(self.free_slots) * self.page_size
+
+    # 锁定缓存：防止被淘汰
+    def lock(self, handle: BaseCacheHandle) -> None:
+        self.prefix_cache.lock_handle(handle, unlock=False)
+
+    # 解锁缓存
+    def unlock(self, handle: BaseCacheHandle) -> None:
+        self.prefix_cache.lock_handle(handle, unlock=True)
+
+    # 给请求分配显存页
+    def allocate_paged(self, reqs: List[Req]) -> None:
+        needed_pages = 0
+        allocation_info: List[Tuple[int, int, int]] = []
+        for req in reqs:
+            # 计算需要分配的页数区间
+            first_page = div_ceil(req.cached_len, self.page_size)
+            last_page = div_ceil(req.device_len, self.page_size)
+            if last_page > first_page:
+                needed_pages += last_page - first_page
+                allocation_info.append((req.table_idx, first_page, last_page))
+
+        # 如果需要分配页
+        if needed_pages > 0:
+            allocated = self._page_to_token(self._allocate(needed_pages))
+            _write_page_table(self.page_table, allocated, allocation_info, self.page_size)
+
+    # 把请求的前缀插入缓存
+    def cache_req(self, req: Req, *, finished: bool) -> None:
+        # 要插入缓存的 token
+        insert_ids = req.input_ids[: req.cached_len]
+        # 对应的 KV 下标
+        page_indices = self.page_table[req.table_idx, : req.cached_len]
+        old_handle = req.cache_handle
+
+        # 插入前缀缓存
+        cached_len, new_handle = self.prefix_cache.insert_prefix(insert_ids, page_indices)
+
+        # 解锁旧的缓存句柄
+        self.unlock(old_handle)
+
+        # 释放已经在缓存里的部分
+        self._free(page_indices[old_handle.cached_len : cached_len])
+
+        # 如果请求结束 → 释放尾部
+        if finished:
+            self._free(page_indices[new_handle.cached_len :])
+        else:
+            # 否则更新缓存句柄
+            req.cache_handle = new_handle
+            self.lock(new_handle)
+
+    # 完整性检查：空闲页 + 缓存页 == 总页数
+    def check_integrity(self) -> None:
+        self.prefix_cache.check_integrity()
+        cache_pages = self.prefix_cache.size_info.total_size // self.page_size
+        if len(self.free_slots) + cache_pages != self.num_pages:
+            raise RuntimeError(
+                "CacheManager integrity check failed:"
+                f" free_pages({len(self.free_slots)}) +"
+                f" cache_pages({cache_pages}) != num_pages({self.num_pages})"
+            )
+        if self.page_size > 1:
+            assert torch.all(self.free_slots % self.page_size == 0)
+
+    # 延迟释放上下文：批量回收，提高速度
+    @contextmanager
+    def lazy_free_region(self):
+        def lazy_free(indices: torch.Tensor) -> None:
+            lazy_free_list.append(indices[:: self.page_size])
+
+        lazy_free_list: List[torch.Tensor] = []
+        try:
+            self._free = lazy_free
+            yield
+        finally:
+            del self._free
+            self.free_slots = torch.cat([self.free_slots] + lazy_free_list)
+
+    # 分配 N 个页
+    def _allocate(self, needed_pages: int) -> torch.Tensor:
+        # 如果空闲不够 → 淘汰缓存
+        if needed_pages > (free_pages := len(self.free_slots)):
+            evicted = self.prefix_cache.evict((needed_pages - free_pages) * self.page_size)
+            self.free_slots = torch.cat([self.free_slots, evicted[:: self.page_size]])
+            assert len(self.free_slots) >= needed_pages, "Eviction did not free enough space."
+        # 分配
+        allocated = self.free_slots[:needed_pages]
+        self.free_slots = self.free_slots[needed_pages:]
+        return allocated
+
+    # 释放显存
+    def _free(self, indices: torch.Tensor) -> None:
+        if len(indices) > 0:
+            self.free_slots = torch.cat([self.free_slots, indices[:: self.page_size]])
+
+    # 把页号 → 展开成 token 下标
+    def _page_to_token(self, pages: torch.Tensor) -> torch.Tensor:
+        if self.page_size == 1:
+            return pages
+        offsets = torch.arange(self.page_size, device=self.device, dtype=torch.int32)
+        return (pages.unsqueeze(1) + offsets).flatten()
+
+
+# =========================================================
+# 页表写入工具函数
+# 把分配好的显存位置 → 写入页表
+# =========================================================
+def _write_page_table(
+    page_table: torch.Tensor,
+    allocated: torch.Tensor,
+    allocation_info: List[Tuple[int, int, int]],
+    page_size: int,
+) -> None:
+    needed_tokens = len(allocated)
+    table_idx_host = torch.empty(needed_tokens, dtype=torch.int64, pin_memory=True)
+    positions_host = torch.empty(needed_tokens, dtype=torch.int64, pin_memory=True)
+    offset = 0
+    for table_idx, first_page, last_page in allocation_info:
+        first_pos, last_pos = first_page * page_size, last_page * page_size
+        length = last_pos - first_pos
+        table_idx_host[offset : offset + length].fill_(table_idx)
+        torch.arange(first_pos, last_pos, out=positions_host[offset : offset + length])
+        offset += length
+    assert offset == needed_tokens, "Mismatch in allocated tokens and filled tokens."
+    table_idxs = table_idx_host.to(page_table.device, non_blocking=True)
+    offsets = positions_host.to(page_table.device, non_blocking=True)
+    page_table[table_idxs, offsets] = allocated
