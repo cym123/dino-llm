@@ -19,11 +19,6 @@ class BackendCreator(Protocol):
 SUPPORTED_ATTENTION_BACKENDS = Registry[BackendCreator]("Attention Backend")
 
 
-@SUPPORTED_ATTENTION_BACKENDS.register("trtllm")
-def create_trtllm_backend(config: ModelConfig):
-    from .trtllm import TensorRTLLMBackend
-
-    return TensorRTLLMBackend(config)
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("fi")
