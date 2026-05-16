@@ -20,11 +20,7 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
-# =========================================================
-# ChunkedReq：分块预取请求
-# 作用：输入太长 → 不能一次跑完 → 分多次 prefill
-# 标记：不能进入 decode 阶段
-# =========================================================
+
 class ChunkedReq(Req):
     # 分块请求不参与采样
     def append_host(self, next_token: torch.Tensor) -> None:

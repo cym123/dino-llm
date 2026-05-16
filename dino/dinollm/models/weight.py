@@ -13,7 +13,7 @@ from tqdm import tqdm
 _SPLIT_DIM_0 = [".q_proj", ".k_proj", ".v_proj", ".gate_proj", ".up_proj"]
 _SPLIT_DIM_1 = [".o_proj", ".down_proj"]
 
-# Merge groups: individual projections -> fused projection
+
 _MERGE_GROUPS = {
     ".q_proj": (".qkv_proj", ("q", "k", "v")),
     ".k_proj": (".qkv_proj", ("q", "k", "v")),
