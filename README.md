@@ -33,11 +33,11 @@ uv venv --python=3.12
 source .venv/bin/activate
 ```
 
-**Prerequisites**: Mini-SGLang relies on CUDA kernels that are JIT-compiled. Ensure you have the **NVIDIA CUDA Toolkit** installed and that its version matches your driver's version. You can check your driver's CUDA capability with `nvidia-smi`.
+**Prerequisites**: Dino-llm relies on CUDA kernels that are JIT-compiled. Ensure you have the **NVIDIA CUDA Toolkit** installed and that its version matches your driver's version. You can check your driver's CUDA capability with `nvidia-smi`.
 
 ### 2. Installation
 
-Install Mini-SGLang directly from the source:
+Install Dino-llm directly from the source:
 
 ```bash
 git clone https://github.com/cym123/dino-llm.git
