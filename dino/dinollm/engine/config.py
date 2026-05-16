@@ -56,15 +56,11 @@ class EngineConfig:
     # ==================== 缓存属性（只算一次，加速访问） ====================
     @cached_property
     def hf_config(self):
-        """加载并缓存 HuggingFace 模型配置（只加载一次）"""
         return cached_load_hf_config(self.model_path)
 
     @cached_property
     def model_config(self) -> ModelConfig:
-        """
-        从 HF 配置解析成 Mini-SGLang 内部模型配置
-        包含:层数、头数、维度、RoPE 位置编码等
-        """
+
         from dinollm.models import ModelConfig
 
         return ModelConfig.from_hf(self.hf_config)
@@ -72,20 +68,15 @@ class EngineConfig:
     # ==================== 计算属性（动态获取，不存储） ====================
     @property
     def max_seq_len(self) -> int:
-        """
-        模型最大序列长度
-        优先用手动覆盖值 → 没有就用模型自带的最大位置编码
-        """
+
         if self.max_seq_len_override is not None:
             return self.max_seq_len_override
         return self.model_config.rotary_config.max_position
 
     @property
     def max_forward_len(self) -> int:
-        """前向传播最大长度（直接等于最大序列长度）"""
         return self.max_seq_len
 
     @property
     def distributed_addr(self) -> str:
-        """分布式通信地址（多卡之间通信用的固定地址）"""
         return "tcp://127.0.0.1:2333"
