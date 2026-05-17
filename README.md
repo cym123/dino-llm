@@ -35,3 +35,6 @@ We recommend using `uv` for fast and reliable dependency management, compatible 
 # Create isolated virtual environment (Python 3.10+ required)
 uv venv --python=3.12
 source .venv/bin/activate
+uv pip install -e .
+
+
