@@ -1,0 +1,350 @@
+"""
+distributed/router.py
+异步轮询负载均衡器 - 支持用户粘性会话 + OpenAI流式 + 全性能监控(TTFT/TPOT/P50/P99)
+功能：
+  1. 用户粘性：同一个用户永远路由到同一个worker，最大化KV Cache命中率
+  2. 兼容原有/generate接口
+  3. 兼容OpenAI流式/v1/chat/completions
+  4. 自动健康检查 + 故障转移
+  5. 实时统计：TTFT、TPOT、平均延迟、P50、P99
+"""
+import argparse
+import asyncio
+import os
+import time
+from itertools import cycle
+from typing import List, Dict
+
+import aiohttp
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+# 创建FastAPI应用实例
+app = FastAPI(title="ML Inference Router (Sticky + OpenAI + Metrics)")
+
+# 原有接口请求数据模型（完全保留）
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 50
+
+class RouterState:
+    """
+    路由状态管理（核心）
+    管理：worker健康状态、用户粘性绑定、全链路监控统计、并发安全
+    """
+    def __init__(self, worker_urls: List[str]):
+        # 所有worker地址列表（固定不变）
+        self.all_workers = worker_urls
+        # 当前健康可用的worker列表
+        self.healthy_workers: List[str] = list(worker_urls)
+        # 轮询迭代器：用于新用户分配节点
+        self._cycle = cycle(self.healthy_workers)
+        # 异步锁：保证高并发下共享数据安全（自动加锁/解锁）
+        self._lock = asyncio.Lock()
+
+        # 用户 -> worker 绑定映射（粘性会话核心）
+        self.user_to_worker: Dict[str, str] = {}
+
+        # 每个worker的全维度统计指标
+        self.stats: Dict[str, dict] = {}
+        for url in worker_urls:
+            self.stats[url] = {
+                # 基础请求统计
+                "requests": 0,
+                "errors": 0,
+                "total_latency_ms": 0.0,
+
+                # 流式指标存储
+                "ttft_list": [],       # 首token时间列表
+                "tpot_list": [],       # 每token时延列表
+                "total_tokens": 0      # 总生成token数
+            }
+
+    def next_worker(self) -> str:
+        """普通轮询：获取下一个健康worker"""
+        if not self.healthy_workers:
+            raise RuntimeError("No healthy workers available")
+        return next(self._cycle)
+
+    async def get_worker_for_user(self, user_id: str) -> str:
+        """
+        【粘性会话核心】
+        根据user_id获取绑定的worker
+        规则：
+            1. 已绑定且worker健康 → 直接返回
+            2. 已绑定但worker挂了 → 删除旧绑定，重新分配
+            3. 未绑定 → 轮询分配并记录
+        """
+        async with self._lock:
+            if not self.healthy_workers:
+                raise RuntimeError("No healthy workers available")
+
+            # 用户已绑定，且worker健康
+            if user_id in self.user_to_worker:
+                worker = self.user_to_worker[user_id]
+                if worker in self.healthy_workers:
+                    return worker
+                # 绑定的worker已下线，删除绑定
+                del self.user_to_worker[user_id]
+
+            # 新用户 / 需重分配：轮询选一个worker
+            new_worker = next(self._cycle)
+            self.user_to_worker[user_id] = new_worker
+            print(f"[Router] 新用户绑定: {user_id} -> {new_worker}")
+            return new_worker
+
+    async def record(self, url: str, latency_ms: float):
+        """记录普通请求（非流式）"""
+        async with self._lock:
+            self.stats[url]["requests"] += 1
+            self.stats[url]["total_latency_ms"] += latency_ms
+
+    async def record_error(self, url: str):
+        """记录请求失败"""
+        async with self._lock:
+            self.stats[url]["errors"] += 1
+
+    async def record_stream_metrics(self, url: str, ttft_ms: float, total_tokens: int, total_latency_ms: float):
+        """
+        记录流式请求指标
+        :param url: worker地址
+        :param ttft_ms: 首token时间
+        :param total_tokens: 总生成token数
+        :param total_latency_ms: 总耗时
+        """
+        async with self._lock:
+            stat = self.stats[url]
+            stat["requests"] += 1
+            stat["ttft_list"].append(ttft_ms)
+            stat["total_tokens"] += total_tokens
+            stat["total_latency_ms"] += total_latency_ms  # ✅ 总耗时已累加
+
+            # 计算TPOT：除首token外，平均每token耗时
+            if total_tokens > 1:
+                output_time = total_latency_ms - ttft_ms
+                tpot = output_time / (total_tokens - 1)
+                stat["tpot_list"].append(tpot)
+
+            # 限制列表长度，防止内存无限增长
+            max_records = 10000
+            stat["ttft_list"] = stat["ttft_list"][-max_records:]
+            stat["tpot_list"] = stat["tpot_list"][-max_records:]
+
+    def _compute_percentile(self, data, percent):
+        """计算百分位：P50/P99"""
+        if not data:
+            return 0.0
+        sorted_data = sorted(data)
+        idx = int(len(sorted_data) * percent / 100)
+        return sorted_data[idx]
+
+    # ✅【修复】mark_unhealthy 方法
+    def mark_unhealthy(self, url: str):
+        """标记worker不健康"""
+        if url in self.healthy_workers:
+            self.healthy_workers.remove(url)
+            self._cycle = cycle(self.healthy_workers) if self.healthy_workers else iter([])
+            print(f"[Router] Worker {url} 已下线. 健康节点数: {len(self.healthy_workers)}")
+
+    # ✅【修复】mark_healthy 方法
+    def mark_healthy(self, url: str):
+        """标记worker健康"""
+        if url not in self.healthy_workers:
+            self.healthy_workers.append(url)
+            self._cycle = cycle(self.healthy_workers)
+            print(f"[Router] Worker {url} 已恢复. 健康节点数: {len(self.healthy_workers)}")
+
+# 全局路由状态对象
+state: RouterState = None
+
+async def health_check_loop(interval: int = 5):
+    """后台定时健康检查：每5秒检查所有worker"""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+        while True:
+            for url in state.all_workers:
+                try:
+                    async with session.get(f"{url}/health") as resp:
+                        if resp.status == 200:
+                            state.mark_healthy(url)
+                        else:
+                            state.mark_unhealthy(url)
+                except Exception:
+                    state.mark_unhealthy(url)
+            await asyncio.sleep(interval)
+
+@app.on_event("startup")
+async def startup():
+    """服务启动时自动执行：启动健康检查任务"""
+    asyncio.create_task(health_check_loop())
+    print(f"[Router] 启动成功！工作节点: {state.all_workers}")
+
+@app.get("/health")
+async def health():
+    """路由健康检查接口"""
+    return {
+        "status": "ok",
+        "healthy_workers": state.healthy_workers,
+        "all_workers": state.all_workers,
+        "active_user_bindings": len(state.user_to_worker),
+        "worker_stats": state.stats
+    }
+
+# ==============================
+# 原有接口：/generate 完全保留
+# ==============================
+@app.post("/generate")
+async def generate(req: GenerateRequest):
+    """原有同步生成接口：等待全部结果返回"""
+    if not state.healthy_workers:
+        raise HTTPException(status_code=503, detail="No healthy workers available")
+
+    worker_url = state.next_worker()
+    start = time.time()
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        try:
+            async with session.post(
+                f"{worker_url}/generate",
+                json={"prompt": req.prompt, "max_new_tokens": req.max_new_tokens}
+            ) as resp:
+                if resp.status != 200:
+                    await state.record_error(worker_url)
+                    raise HTTPException(status_code=resp.status, detail=await resp.text())
+
+                result = await resp.json()
+                latency = (time.time() - start) * 1000
+                await state.record(worker_url, latency)
+
+                result["routed_to"] = worker_url
+                result["router_latency_ms"] = latency
+                return result
+
+        except aiohttp.ClientError as e:
+            await state.record_error(worker_url)
+            state.mark_unhealthy(worker_url)
+            raise HTTPException(status_code=503, detail=f"Worker {worker_url} 无法连接: {str(e)}")
+
+# ==============================
+# 新增：OpenAI 流式接口 + 粘性会话 + 全指标监控
+# ==============================
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(request: Request):
+    if not state.healthy_workers:
+        raise HTTPException(status_code=503, detail="No healthy workers available")
+
+    # 解析请求体
+    body = await request.json()
+    # 识别用户ID，实现粘性会话
+    user_id = body.get("user") or body.get("session_id") or request.client.host or "anonymous"
+    # 为用户分配固定worker
+    worker_url = await state.get_worker_for_user(user_id)
+
+    # 计时
+    start_all = time.time()
+    ttft_recorded = False
+    ttft_ms = 0.0
+    total_tokens = 0
+
+    try:
+        async def stream_forward():
+            nonlocal ttft_recorded, ttft_ms, total_tokens
+
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+                async with session.post(
+                    f"{worker_url}/v1/chat/completions",
+                    json=body,
+                    headers=dict(request.headers)
+                ) as resp:
+
+                    async for chunk in resp.content.iter_chunked(1024):
+                        # 第一次返回数据：记录TTFT
+                        if not ttft_recorded:
+                            ttft_ms = (time.time() - start_all) * 1000
+                            ttft_recorded = True
+                        else:
+                            total_tokens += 1
+
+                        yield chunk
+
+            # 请求结束：记录完整指标
+            total_latency = (time.time() - start_all) * 1000
+            await state.record_stream_metrics(
+                url=worker_url,
+                ttft_ms=ttft_ms,
+                total_tokens=total_tokens,
+                total_latency_ms=total_latency
+            )
+
+        return StreamingResponse(
+            stream_forward(),
+            media_type="text/event-stream"
+        )
+
+    except aiohttp.ClientError as e:
+        await state.record_error(worker_url)
+        state.mark_unhealthy(worker_url)
+        raise HTTPException(status_code=503, detail=f"Worker {worker_url} 无法连接")
+
+# ==============================
+# 监控统计接口：输出 TTFT / TPOT / P50 / P99
+# ==============================
+@app.get("/stats")
+async def stats():
+    """
+    全维度监控面板
+    包含：请求数、错误数、平均延迟、TTFT、TPOT、P50、P99
+    """
+    summary = {}
+    for url, s in state.stats.items():
+        req_count = s["requests"]
+        err_count = s["errors"]
+        avg_lat = s["total_latency_ms"] / req_count if req_count > 0 else 0.0
+
+        # TTFT 统计
+        ttft_list = s["ttft_list"]
+        avg_ttft = sum(ttft_list) / len(ttft_list) if ttft_list else 0.0
+        p50_ttft = state._compute_percentile(ttft_list, 50)
+        p99_ttft = state._compute_percentile(ttft_list, 99)
+
+        # TPOT 统计
+        tpot_list = s["tpot_list"]
+        avg_tpot = sum(tpot_list) / len(tpot_list) if tpot_list else 0.0
+        p50_tpot = state._compute_percentile(tpot_list, 50)
+        p99_tpot = state._compute_percentile(tpot_list, 99)
+
+        summary[url] = {
+            "requests": req_count,
+            "errors": err_count,
+            "avg_total_latency_ms": round(avg_lat, 2),
+            "total_tokens_generated": s["total_tokens"],
+            "ttft_ms": {
+                "avg": round(avg_ttft, 2),
+                "p50": round(p50_ttft, 2),
+                "p99": round(p99_ttft, 2)
+            },
+            "tpot_ms": {
+                "avg": round(avg_tpot, 4),
+                "p50": round(p50_tpot, 4),
+                "p99": round(p99_tpot, 4)
+            }
+        }
+
+    return {
+        "workers": summary,
+        "healthy_workers": state.healthy_workers,
+        "active_user_bindings": len(state.user_to_worker)
+    }
+
+# ==============================
+# 启动入口
+# ==============================
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="分布式LLM推理路由（粘性会话+OpenAI兼容+全监控）")
+    parser.add_argument("--workers", nargs="+", required=True, help="worker节点地址列表")
+    parser.add_argument("--port", type=int, default=8080, help="路由服务端口")
+    args = parser.parse_args()
+
+    state = RouterState(args.workers)
+    uvicorn.run(app, host="0.0.0.0", port=args.port)

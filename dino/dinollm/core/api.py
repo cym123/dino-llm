@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Literal, Tuple
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
+import os
 
 
 from dinollm.core import SamplingParams
@@ -272,11 +273,18 @@ async def lifespan(_: FastAPI):
     global _GLOBAL_STATE
     if _GLOBAL_STATE is not None:
         _GLOBAL_STATE.shutdown()
+        
+WORKER_ID = os.getenv("WORKER_ID", "worker-0")
+WORKER_PORT = int(os.getenv("WORKER_PORT", "8001"))
 
 
 # 初始化 FastAPI
 app = FastAPI(title="dinollm API Server", version="0.0.1", lifespan=lifespan)
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "worker_id": WORKER_ID, "port": WORKER_PORT}
 
 
 @app.post("/generate")
