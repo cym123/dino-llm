@@ -8,10 +8,9 @@ from dinollm.distributed import DistributedCommunicator, get_tp_info
 from dinollm.utils import div_even
 
 from .base import BaseOP
-import torch.nn as nn
 
 
-class _LinearTPImpl(nn.Module):
+class _LinearTPImpl(BaseOP):
     """Real implementation of a linear layer with tensor parallelism."""
 
     def __init__(
@@ -22,13 +21,12 @@ class _LinearTPImpl(nn.Module):
         local_osize: int,
         has_bias: bool,
     ):
-        super().__init__()
         self.full_input_size = full_isize
         self.full_output_size = full_osize
         self.local_input_size = local_isize
         self.local_output_size = local_osize
-        self.weight = nn.Parameter(torch.empty(local_osize, local_isize))
-        self.bias = nn.Parameter(torch.empty(local_osize)) if has_bias else None
+        self.weight = torch.empty(local_osize, local_isize)
+        self.bias = torch.empty(local_osize) if has_bias else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.linear(x, self.weight, self.bias)

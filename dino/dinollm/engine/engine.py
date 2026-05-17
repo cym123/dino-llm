@@ -51,44 +51,9 @@ class Engine:
         # ======================= 模型初始化 ========================
         # 设置RoPE设备
         set_rope_device(self.device)
-        # 使用 meta 设备初始化模型（不占显存）
-        # with torch.device("meta"), torch_dtype(config.dtype):
-
-       
-
-        self.model = create_model(config.model_config)
-        self.model = self.model.to(self.device, dtype=torch.bfloat16)
-        set_rope_device(self.device)
-
-
-
-        
-
-        print(f"create_model model keys: { list(self.model.state_dict().keys())}")
-
-        dic_ff = self._load_weight_state_dict(config)
-        fixed = {}
-        for k, v in dic_ff.items():
-            fixed[k] = v
-            if "self_attn.q_norm" in k:
-                fixed[k.replace("self_attn.q_norm", "self_attn.attn.q_norm")] = v
-            if "self_attn.k_norm" in k:
-                fixed[k.replace("self_attn.k_norm", "self_attn.attn.k_norm")] = v
-
-            if "model.embed_tokens.weight" in k:
-                fixed["lm_head.tied_embedding.weight"] = v
-            
-
-            if "lm_head.weight" in k:
-                fixed[k.replace("lm_head.weight", "lm_head.embedding.weight")] = v
-
-
-        if "lm_head.weight" in fixed:
-            del fixed["lm_head.weight"]
-
-
-        print(f"dic_ff keys: {list(fixed.keys())}")
-        self.model.load_state_dict(fixed)
+        with torch.device("meta"), torch_dtype(config.dtype):
+            self.model = create_model(config.model_config)
+        self.model.load_state_dict(self._load_weight_state_dict(config))
 
         # ======================= KV Cache 初始化 =======================
         self.num_pages = self._determine_num_pages(init_free_memory, config)

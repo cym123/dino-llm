@@ -10,14 +10,12 @@ from dinollm.utils import div_even
 from .base import StateLessOP
 from .rotary import get_rope
 
-import torch.nn as nn
-
 if TYPE_CHECKING:
     from dinollm.layers import RMSNorm
     from dinollm.models import RotaryConfig
 
 
-class AttentionLayer(nn.Module):
+class AttentionLayer(StateLessOP):
     def __init__(
         self,
         layer_id: int,
@@ -28,7 +26,6 @@ class AttentionLayer(nn.Module):
         q_norm: RMSNorm | None = None,
         k_norm: RMSNorm | None = None,
     ):
-        super().__init__()
         assert num_qo_heads % num_kv_heads == 0
         self.layer_id = layer_id
         self.head_dim = head_dim

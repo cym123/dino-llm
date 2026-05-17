@@ -5,12 +5,11 @@ import math
 from typing import Any, Callable, Dict, Tuple
 
 import torch
-import torch.nn as nn
 
 from .base import StateLessOP
 
 
-class RotaryEmbedding(nn.Module):
+class RotaryEmbedding(StateLessOP):
     def __init__(
         self,
         head_size: int,
@@ -30,7 +29,7 @@ class RotaryEmbedding(nn.Module):
         cos = freqs.cos()
         sin = freqs.sin()
         # buffer, so don't load/save
-        self._cos_sin_cache = torch.cat((cos, sin), dim=-1).cuda()
+        self._cos_sin_cache = torch.cat((cos, sin), dim=-1)
         assert self.head_size in [64, 128, 256, 512]
 
         from flashinfer import apply_rope_with_cos_sin_cache_inplace

@@ -3,17 +3,14 @@ from typing import Tuple
 import torch
 
 from .base import BaseOP
-import torch.nn as nn
 
 
-class RMSNorm(nn.Module):
+class RMSNorm(BaseOP):
     def __init__(self, size: int, eps: float) -> None:
-        super().__init__()
-
         from flashinfer import rmsnorm
 
         self.eps = eps
-        self.weight = nn.Parameter(torch.empty(size))
+        self.weight = torch.empty(size)
         self.rmsnorm = rmsnorm
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -23,13 +20,12 @@ class RMSNorm(nn.Module):
         self.rmsnorm(x, self.weight, self.eps, out=x)
 
 
-class RMSNormFused(nn.Module):
+class RMSNormFused(BaseOP):
     def __init__(self, size: int, eps: float) -> None:
-        super().__init__()
         from flashinfer import fused_add_rmsnorm, rmsnorm
 
         self.eps = eps
-        self.weight = nn.Parameter(torch.empty(size))
+        self.weight = torch.empty(size)
         self.rmsnorm = rmsnorm
         self.fused_add_rmsnorm = fused_add_rmsnorm
 

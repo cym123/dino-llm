@@ -3,10 +3,8 @@ import importlib
 from .config import ModelConfig
 
 _MODEL_REGISTRY = {
-    
     "Qwen3ForCausalLM": (".qwen3", "Qwen3ForCausalLM"),
     "Qwen3MoeForCausalLM": (".qwen3_moe", "Qwen3MoeForCausalLM"),
-   
 }
 
 

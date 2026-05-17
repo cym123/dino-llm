@@ -9,10 +9,9 @@ from dinollm.distributed import DistributedCommunicator, get_tp_info
 from dinollm.utils import div_ceil, nvtx_annotate
 
 from .base import BaseOP
-import torch.nn as nn
 
 
-class VocabParallelEmbedding(nn.Module):
+class VocabParallelEmbedding(BaseOP):
     def __init__(
         self,
         num_embeddings: int,
@@ -27,21 +26,18 @@ class VocabParallelEmbedding(nn.Module):
         start_idx = self.num_embeddings_tp * tp_rank
         finish_idx = min(start_idx + self.num_embeddings_tp, num_embeddings)
         self.vocab_range = (start_idx, finish_idx - start_idx)
-        # self.weight = nn.Parameter(torch.empty(self.num_embeddings_tp, embedding_dim))
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-
+        self.weight = torch.empty(self.num_embeddings_tp, embedding_dim)
         self._comm = DistributedCommunicator()
 
     @nvtx_annotate("Embedding")
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # from dinollm.kernel import indexing
+        from dinollm.kernel import indexing
 
-        # y = indexing(
-        #     weights=self.weight,
-        #     indices=x,
-        #     vocab_range=self.vocab_range if self.tp_size > 1 else None,
-        # )
-        y = self.embedding[x]
+        y = indexing(
+            weights=self.weight,
+            indices=x,
+            vocab_range=self.vocab_range if self.tp_size > 1 else None,
+        )
 
         return self._comm.all_reduce(y) if self.tp_size > 1 else y
 
@@ -80,8 +76,6 @@ class ParallelLMHead(VocabParallelEmbedding):
 
     def state_dict(
         self,
-        destination=None,
-        keep_vars=False,
         *,
         prefix: str = "",
         result: Dict[str, torch.Tensor] | None = None,

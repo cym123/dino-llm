@@ -18,15 +18,12 @@ from dinollm.layers import (
 from dinollm.models import ModelConfig
 from dinollm.utils import nvtx_annotate
 
-import torch.nn as nn
-
 if TYPE_CHECKING:
     import torch
 
 
-class GatedMLP(nn.Module):
+class GatedMLP(BaseOP):
     def __init__(self, config: ModelConfig):
-        super().__init__()
         self.gate_up_proj = LinearColParallelMerged(
             config.hidden_size,
             [config.intermediate_size, config.intermediate_size],
@@ -79,7 +76,7 @@ class MoEMLP(BaseOP):
         return final_hidden_states
 
 
-class RopeAttn(nn.Module):
+class RopeAttn(BaseOP):
     def __init__(
         self,
         config: ModelConfig,
@@ -88,7 +85,6 @@ class RopeAttn(nn.Module):
         has_attn_bias: bool = False,
         has_qk_norm: bool = False,
     ):
-        super().__init__()
         head_dim = config.head_dim
         self.qkv_proj = LinearQKVMerged(
             hidden_size=config.hidden_size,
