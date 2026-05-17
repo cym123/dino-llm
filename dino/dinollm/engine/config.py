@@ -1,23 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-# 缓存属性：只计算一次，后续直接用（加速）
 from functools import cached_property
-# 类型检查：仅给编辑器提示用，运行时不执行
 from typing import TYPE_CHECKING, List
 
 import torch
-# 分布式信息：rank / size（你之前看过的那个类）
 from dinollm.distributed import DistributedInfo
-# 工具函数：缓存加载 HuggingFace 模型配置
 from dinollm.utils import cached_load_hf_config
 
-# 仅用于类型检查，避免运行时循环导入
 if TYPE_CHECKING:
     from dinollm.models import ModelConfig
 
 
-@dataclass(frozen=True)  # frozen=True = 实例创建后不可修改（安全）
+@dataclass(frozen=True)
 class EngineConfig:
     """
     【引擎核心配置类】

@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, List
 
 import torch
 
-# 类型提示专用，不运行
 if TYPE_CHECKING:
     from dinollm.core import SamplingParams  # 采样参数（max_tokens/temp等）
     from .prefill import ChunkedReq         # 分块预填充的请求（长文本分块）
@@ -24,12 +23,10 @@ class PendingReq:
 
     @property
     def input_len(self) -> int:
-        # 输入token的长度（方便获取）
         return len(self.input_ids)
 
     @property
     def output_len(self) -> int:
-        # 要生成多少个token（从采样参数里取）
         return self.sampling_params.max_tokens
 
 

@@ -37,9 +37,8 @@ def _run_scheduler(args: ServerArgs, ack_queue: mp.Queue[str]) -> None:
         except KeyboardInterrupt:
             logger = init_logger(__name__)
             if args.tp_info.is_primary():
-                print()  # 换行，让^C显示更干净
+                print()
                 logger.info("Scheduler exiting gracefully...")
-            # 关闭调度器，释放资源
             scheduler.shutdown()
 
 
@@ -56,22 +55,17 @@ def launch_server() -> None:
 
         from dinollm.tokenizer import tokenize_worker
 
-        # CUDA多进程必须使用spawn方式启动
         mp.set_start_method("spawn", force=True)
 
-        # TP并行大小 = 使用的GPU数量
         world_size = server_args.tp_info.size
-        # 用于等待子进程启动完成的消息队列
         ack_queue: mp.Queue[str] = mp.Queue()
 
         # ========== 1. 为每个GPU启动一个Scheduler进程 ==========
         for i in range(world_size):
-            # 复制参数并设置当前rank信息
             new_args = replace(
                 server_args,
                 tp_info=DistributedInfo(i, world_size),
             )
-            # 创建并启动调度器进程
             mp.Process(
                 target=_run_scheduler,
                 args=(new_args, ack_queue),

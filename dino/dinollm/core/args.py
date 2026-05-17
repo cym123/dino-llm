@@ -5,13 +5,9 @@ import os
 from dataclasses import dataclass
 from typing import List, Tuple
 
-# PyTorch 张量类型
 import torch
-# 分布式信息（当前GPU / 总GPU数）
 from dinollm.distributed import DistributedInfo
-# 调度器基础配置
 from dinollm.scheduler import SchedulerConfig
-# 日志工具
 from dinollm.utils import init_logger
 
 
@@ -23,18 +19,15 @@ class ServerArgs(SchedulerConfig):
     继承自 SchedulerConfig（调度器配置）
     增加：API服务、Tokenizer、ZMQ通信地址
     """
-    # API 服务监听地址
     server_host: str = "127.0.0.1"
-    # API 服务端口
     server_port: int = 1919
     # 分词器进程数量
     num_tokenizer: int = 0
-    # 是否静默输出（减少日志）
     silent_output: bool = False
 
     @property
     def share_tokenizer(self) -> bool:
-        """是否共享 Tokenizer/DeTokenizer（同一进程）"""
+        """是否共享 Tokenizer/DeTokenizer(同一进程)"""
         return self.num_tokenizer == 0
 
     @property
@@ -90,7 +83,7 @@ def parse_args(args: List[str]) -> ServerArgs:
     parser.add_argument(
         "--model-path", "--model",
         type=str, required=True,
-        help="模型路径（本地文件夹或HF模型ID）",
+        help="模型路径",
     )
 
     # 数据类型

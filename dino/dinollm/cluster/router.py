@@ -1,5 +1,4 @@
 """
-distributed/router.py
 异步轮询负载均衡器 - 支持用户粘性会话 + OpenAI流式 + 全性能监控(TTFT/TPOT/P50/P99)
 功能：
   1. 用户粘性：同一个用户永远路由到同一个worker，最大化KV Cache命中率
@@ -7,6 +6,7 @@ distributed/router.py
   3. 兼容OpenAI流式/v1/chat/completions
   4. 自动健康检查 + 故障转移
   5. 实时统计：TTFT、TPOT、平均延迟、P50、P99
+  6. Prometheus 采集配置 Grafana 仪表盘
 """
 import argparse
 import asyncio
@@ -24,8 +24,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 # ==========================================
-# 【新增：Prometheus 监控依赖导入】
-# 作用：给程序添加指标采集能力，供 Prometheus 抓取
+# 【Prometheus 监控依赖导入】
 # ==========================================
 from prometheus_client import (
     Counter,      # 计数器：请求数、错误数、token数
@@ -35,10 +34,7 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST
 )
 
-# ==========================================
-# 【新增：定义所有监控指标】
-# 每个指标都标注了用途，一目了然
-# ==========================================
+
 
 # 1. 请求总数计数器（按worker节点 + 接口类型分类）
 REQUEST_TOTAL = Counter(
@@ -72,7 +68,7 @@ TTFT_HISTOGRAM = Histogram(
     "router_ttft_ms",
     "Time to first token in ms",
     ["worker"],
-    buckets=[50, 100, 200, 300, 500, 800, 1000, 2000, 5000]
+    buckets=[10, 20, 30, 50, 100, 200, 300, 500, 800, 1000, 2000, 5000]
 )
 
 # 6. TPOT 每token生成时间（直方图）
@@ -88,7 +84,7 @@ REQUEST_LATENCY = Histogram(
     "router_request_latency_ms",
     "Total request latency in ms",
     ["worker"],
-    buckets=[100, 300, 500, 1000, 3000, 5000, 10000]
+    buckets=[100, 300, 500, 1000, 3000, 5000, 10000,15000,20000]
 )
 
 # 8. 生成Token总数
@@ -112,14 +108,11 @@ class RouterState:
     管理：worker健康状态、用户粘性绑定、全链路监控统计、并发安全
     """
     def __init__(self, worker_urls: List[str]):
-        # 所有worker地址列表（固定不变）
         self.all_workers = worker_urls
-        # 当前健康可用的worker列表
         self.healthy_workers: List[str] = list(worker_urls)
-        # 轮询迭代器：用于新用户分配节点
         self._cycle = cycle(self.healthy_workers)
-        # 异步锁：保证高并发下共享数据安全（自动加锁/解锁）
-        self._lock = asyncio.Lock()
+        self._router_lock = asyncio.Lock()    # 路由：用户绑定、健康节点
+        self._stats_lock = asyncio.Lock()     # 统计：请求数、TTFT、TPOT、tokens
 
         # 用户 -> worker 绑定映射（粘性会话核心）
         self.user_to_worker: Dict[str, str] = {}
@@ -154,7 +147,7 @@ class RouterState:
             2. 已绑定但worker挂了 → 删除旧绑定，重新分配
             3. 未绑定 → 轮询分配并记录
         """
-        async with self._lock:
+        async with self._router_lock:
             if not self.healthy_workers:
                 raise RuntimeError("No healthy workers available")
 
@@ -174,22 +167,18 @@ class RouterState:
 
     async def record(self, url: str, latency_ms: float):
         """记录普通请求（非流式）"""
-        async with self._lock:
+        async with self._stats_lock:
             self.stats[url]["requests"] += 1
             self.stats[url]["total_latency_ms"] += latency_ms
-        # ==============================
-        # 【新增：上报Prometheus指标】
-        # ==============================
+
         REQUEST_TOTAL.labels(worker=url, api_type="generate").inc()
         REQUEST_LATENCY.labels(worker=url).observe(latency_ms)
 
     async def record_error(self, url: str):
         """记录请求失败"""
-        async with self._lock:
+        async with self._stats_lock:
             self.stats[url]["errors"] += 1
-        # ==============================
-        # 【新增：上报错误指标】
-        # ==============================
+
         ERROR_TOTAL.labels(worker=url).inc()
 
     async def record_stream_metrics(self, url: str, ttft_ms: float, total_tokens: int, total_latency_ms: float):
@@ -200,12 +189,12 @@ class RouterState:
         :param total_tokens: 总生成token数
         :param total_latency_ms: 总耗时
         """
-        async with self._lock:
+        async with self._stats_lock:
             stat = self.stats[url]
             stat["requests"] += 1
             stat["ttft_list"].append(ttft_ms)
             stat["total_tokens"] += total_tokens
-            stat["total_latency_ms"] += total_latency_ms  # ✅ 总耗时已累加
+            stat["total_latency_ms"] += total_latency_ms
 
             # 计算TPOT：除首token外，平均每token耗时
             if total_tokens > 1:
@@ -217,9 +206,6 @@ class RouterState:
             max_records = 10000
             stat["ttft_list"] = stat["ttft_list"][-max_records:]
             stat["tpot_list"] = stat["tpot_list"][-max_records:]
-        # ============================
-        # 【正确】锁外：Prometheus 上报
-        # ============================
         REQUEST_TOTAL.labels(worker=url, api_type="openai").inc()
         TTFT_HISTOGRAM.labels(worker=url).observe(ttft_ms)
         REQUEST_LATENCY.labels(worker=url).observe(total_latency_ms)
@@ -238,17 +224,13 @@ class RouterState:
         idx = int(len(sorted_data) * percent / 100)
         return sorted_data[idx]
 
-    # ✅【修复】mark_unhealthy 方法
     def mark_unhealthy(self, url: str):
-        """标记worker不健康"""
         if url in self.healthy_workers:
             self.healthy_workers.remove(url)
             self._cycle = cycle(self.healthy_workers) if self.healthy_workers else iter([])
             print(f"[Router] Worker {url} 已下线. 健康节点数: {len(self.healthy_workers)}")
 
-    # ✅【修复】mark_healthy 方法
     def mark_healthy(self, url: str):
-        """标记worker健康"""
         if url not in self.healthy_workers:
             self.healthy_workers.append(url)
             self._cycle = cycle(self.healthy_workers)
@@ -290,15 +272,13 @@ async def health():
     }
     
 # ==============================
-# 【新增】Prometheus 指标接口
+# Prometheus 指标接口
 # ==============================
 @app.get("/metrics", response_class=PlainTextResponse)
 async def metrics():
     return generate_latest()
 
-# ==============================
-# 原有接口：/generate 完全保留
-# ==============================
+
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     """原有同步生成接口：等待全部结果返回"""
@@ -332,18 +312,15 @@ async def generate(req: GenerateRequest):
             raise HTTPException(status_code=503, detail=f"Worker {worker_url} 无法连接: {str(e)}")
 
 # ==============================
-# 新增：OpenAI 流式接口 + 粘性会话 + 全指标监控
+# OpenAI 流式接口 + 粘性会话 + 全指标监控
 # ==============================
 @app.post("/v1/chat/completions")
 async def openai_chat_completions(request: Request):
     if not state.healthy_workers:
         raise HTTPException(status_code=503, detail="No healthy workers available")
 
-    # 解析请求体
     body = await request.json()
-    # 识别用户ID，实现粘性会话
     user_id = body.get("user") or body.get("session_id") or request.client.host or "anonymous"
-    # 为用户分配固定worker
     worker_url = await state.get_worker_for_user(user_id)
 
     # 计时
@@ -446,7 +423,7 @@ async def stats():
 # 启动入口
 # ==============================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="分布式LLM推理路由（粘性会话+OpenAI兼容+全监控）")
+    parser = argparse.ArgumentParser(description="分布式DinoLLM推理路由")
     parser.add_argument("--workers", nargs="+", required=True, help="worker节点地址列表")
     parser.add_argument("--port", type=int, default=8080, help="路由服务端口")
     args = parser.parse_args()

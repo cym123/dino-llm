@@ -145,9 +145,7 @@ class FrontendManager:
             for msg in _unwrap_msg(msg):
                 if msg.uid not in self.ack_map:
                     continue
-                # 把当前用户的结果放入对应 UID 队列
                 self.ack_map[msg.uid].append(msg)
-                # 并且通知：有新数据
                 self.event_map[msg.uid].set()
 
     #启动监听你 只需要启动一次 根据 initialized判断
@@ -164,37 +162,26 @@ class FrontendManager:
         await self.send_tokenizer.put(msg)
 
     # 为每个用户启动一个监听 判断是否来了数据 来了数据 读取 然后yield 出去
-# 【核心函数】根据用户ID，等待模型一段一段生成结果，流式返回
+    # 【核心函数】根据用户ID，等待模型一段一段生成结果，流式返回
     async def wait_for_ack(self, uid: int):
         """等待并迭代返回结果（流式）"""
-        # 拿到这个用户专属的“等待事件”（每个人一个，互不干扰）
         event = self.event_map[uid]
 
-        # 无限循环：一直等，直到模型回答结束
+
         while True:
-            # 等待模型生成内容（不卡死程序）
             await event.wait()
-            # 模型生成了一段，清空等待状态，准备等下一段
             event.clear()
 
-            # 取出这个用户刚生成好的所有内容片段
             pending = self.ack_map[uid]
-            # 取出后清空缓存，准备接收下一批内容
             self.ack_map[uid] = []
-            # 定义变量，用来保存最后一条结果
             ack = None
             
-            # 循环把每一段内容返回给调用者
             for ack in pending:
-                # 流式返回：来一段，返回一段
                 yield ack
             
-            # 如果最后一条内容标记为“已结束”
             if ack and ack.finished:
-                # 退出循环，不再等待
                 break
 
-        # 【对话完成】清理这个用户的所有数据，释放内存
         del self.ack_map[uid]
         del self.event_map[uid]
 
@@ -392,7 +379,6 @@ def run_api_server(config: ServerArgs, start_backend: Callable[[], None]) -> Non
     # 启动后端（调度器 + 分词器）
     start_backend()
 
-    logger.info(f"API server is ready to serve on {host}:{port}")
+    logger.info(f"DinoLLM API server is ready to serve on {host}:{port}")
 
-    # 启动 API 或 Shell
     uvicorn.run(app, host=host, port=port)

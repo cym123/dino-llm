@@ -4,17 +4,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, List
 
 import torch
-# 工具：判断显卡型号、性能标记
 from dinollm.utils import is_sm90_supported, nvtx_annotate
 
 if TYPE_CHECKING:
     from dinollm.core import Batch
 
 
-# --------------------------
-# 批量采样参数：温度、top_k、top_p
-# 每个请求可以有不同的参数
-# --------------------------
+
 @dataclass
 class BatchSamplingArgs:
     temperatures: torch.Tensor | None  # 温度值
@@ -22,10 +18,7 @@ class BatchSamplingArgs:
     top_p: torch.CudaTensor | None = None  # top_p
 
 
-# --------------------------
-# 工具函数：把CPU数据 -> 异步传到GPU
-# pin_memory + non_blocking = 快
-# --------------------------
+
 def make_device_tensor(data: List, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
     return torch.tensor(data, dtype=dtype, pin_memory=True).to(device, non_blocking=True)
 

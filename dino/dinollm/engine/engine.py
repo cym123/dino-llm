@@ -30,30 +30,21 @@ class ForwardOutput(NamedTuple):
 class Engine:
 
     def __init__(self, config: EngineConfig):
-        # 安全检查：CUDA 不能提前初始化
         assert not torch.cuda.is_initialized()
-        # 设置张量并行信息（rank/size）
         set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
-        # 自动调整配置（attention后端、page size等）
         _adjust_config(config)
 
-        # 设置当前GPU设备
         self.device = torch.device(f"cuda:{config.tp_info.rank}")
         torch.cuda.set_device(self.device)
         torch.manual_seed(42)
-        # 创建推理流（CUDA Stream） 创建一条全新、独立、干净的任务队列
         self.stream = torch.cuda.Stream()
-        # 接下来所有的 GPU 操作，都往我这条新队列里丢！
         torch.cuda.set_stream(self.stream)
-        # 推理精度
         self.dtype = config.dtype
-        # 全局上下文（保存page table、kv cache、attention backend等）
         self.ctx = Context(config.page_size)
         set_global_ctx(self.ctx)
 
         # ======================= 初始化多卡通信 =======================
         self.tp_cpu_group = self._init_communication(config)
-        # 获取初始空闲显存
         init_free_memory = self._sync_get_memory()[1]
         logger.info_rank0(f"加载模型前空闲显存: {mem_GB(init_free_memory)}")
 
@@ -66,9 +57,7 @@ class Engine:
        
 
         self.model = create_model(config.model_config)
-
         self.model = self.model.to(self.device, dtype=torch.bfloat16)
-
         set_rope_device(self.device)
 
 
@@ -77,9 +66,7 @@ class Engine:
 
         print(f"create_model model keys: { list(self.model.state_dict().keys())}")
 
-        # 加载模型权重
         dic_ff = self._load_weight_state_dict(config)
-        # 自动把权重复制到模型需要的 key 上
         fixed = {}
         for k, v in dic_ff.items():
             fixed[k] = v
@@ -93,7 +80,6 @@ class Engine:
             
 
             if "lm_head.weight" in k:
-                # fixed["lm_head.embedding.weight"] = v
                 fixed[k.replace("lm_head.weight", "lm_head.embedding.weight")] = v
 
 
@@ -104,11 +90,9 @@ class Engine:
         print(f"dic_ff keys: {list(fixed.keys())}")
         self.model.load_state_dict(fixed)
 
-        # ======================= KV Cache 初始化 ========================
-        # 计算能分配多少个KV块
+        # ======================= KV Cache 初始化 =======================
         self.num_pages = self._determine_num_pages(init_free_memory, config)
         num_tokens = self.num_pages * config.page_size
-        # 创建KV缓存池（PagedAttention核心）
         self.ctx.kv_cache = self.kv_cache = create_kvcache_pool(
             model_config=config.model_config,
             num_pages=self.num_pages + 1,  # +1 虚拟页
@@ -118,11 +102,8 @@ class Engine:
         )
 
         # ======================= Page Table 初始化 ========================
-        # 最大序列长度
         self.max_seq_len = min(config.max_seq_len, num_tokens)
-        # 对齐到32（硬件加速要求）
         aligned_max_seq_len = _align_up_32(self.max_seq_len)
-        # Page Table：记录每个请求的token对应哪个KV块
         self.ctx.page_table = self.page_table = torch.zeros(
             (config.max_running_req + 1, aligned_max_seq_len),
             dtype=torch.int32,
@@ -138,15 +119,12 @@ class Engine:
             self.ctx.moe_backend = self.moe_backend = create_moe_backend(config.moe_backend)
 
         # ======================= 采样器初始化 ========================
-        # 负责从logit生成下一个token
         self.sampler = Sampler(self.device, config.model_config.vocab_size)
 
-        # 打印初始化后显存
         post_free_memory = self._sync_get_memory()[0]
         logger.info_rank0(f"初始化后空闲显存: {mem_GB(post_free_memory)}")
 
         # ======================= CUDA Graph 初始化 ========================
-        # 虚拟请求（用于CUDA Graph捕获）
         self.dummy_req = Req(
             input_ids=torch.tensor([0], dtype=torch.int32, device="cpu"),
             table_idx=config.max_running_req,
