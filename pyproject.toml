@@ -37,6 +37,7 @@ dependencies = [
     "sgl_kernel>=0.3.17.post1",
     "quack-kernels",
     "aiohttp>=3.9.0",
+    prometheus-client,
 ]
 
 

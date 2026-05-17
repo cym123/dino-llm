@@ -1,7 +1,7 @@
 import requests
 import json
 
-url = "http://localhost:1919/v1/chat/completions"
+url = "http://localhost:2000/v1/chat/completions"
 
 context = "我叫dino-y"
 question = "你好，你是谁"
