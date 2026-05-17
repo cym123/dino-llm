@@ -35,6 +35,7 @@ We recommend using `uv` for fast and reliable dependency management, compatible 
 uv venv --python=3.12
 source .venv/bin/activate
 uv pip install -e .
+python -m dinollm --model "Qwen/Qwen3-0.6B"
 
 
 
