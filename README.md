@@ -28,7 +28,6 @@ Centered on dynamic batching, KV cache optimization and full observability, it s
 
 ## 🚀 Quick Start
 
-### 1. Environment Setup
 We recommend using `uv` for fast and reliable dependency management, compatible with conda environment.
 
 ```bash
@@ -36,5 +35,6 @@ We recommend using `uv` for fast and reliable dependency management, compatible 
 uv venv --python=3.12
 source .venv/bin/activate
 uv pip install -e .
+
 
 
