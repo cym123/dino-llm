@@ -34,6 +34,16 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST
 )
 
+# ===================== 导入集群限流&调度核心组件 =====================
+# 早期拒绝器：用户Token/QPS/全局QPS/黑白名单/高负载拒绝
+from .early_rejector import PredictiveEarlyRejector
+# 负载打分器：7维GPU推理节点综合负载评分
+from .load_predictor import WorkerLoadPredictor, WorkerMetrics
+# SLO健康管控：延迟、队列、KV缓存阈值熔断
+from .slo_enforcer import SLOEnforcer
+# 路由策略管理器：粘性/负载最优/轮询策略统一管理
+from .route_strategy import RouteStrategyManager, RoutePolicy
+
 
 
 # 1. 请求总数计数器（按worker节点 + 接口类型分类）
@@ -131,6 +141,35 @@ class RouterState:
                 "tpot_list": [],       # 每token时延列表
                 "total_tokens": 0      # 总生成token数
             }
+        # ====================== 新增：调度&限流核心实例初始化 ======================
+        # 1. 节点负载打分器
+        self.load_predictor = WorkerLoadPredictor()
+        # 2. SLO服务等级熔断管控
+        self.slo_enforcer = SLOEnforcer()
+        # 3. 多策略路由管理器
+        self.route_manager = RouteStrategyManager(self.load_predictor)
+        # 4. 全维度早期拒绝器【核心：用户Token/用户QPS/全局QPS/黑白名单】
+        self.early_rejector = PredictiveEarlyRejector(
+            max_global_qps=400,        # 全局集群最大QPS
+            max_user_qps=2,            # 单用户每秒最大请求数
+            max_user_token_quota=100000000, # 单用户累计最大Token额度
+            high_load_score_threshold=0.9  # 节点负载分数超过0.75直接拒绝
+        )
+
+        # 存储每个worker实时7维推理指标
+        self.worker_realtime_metrics: Dict[str, WorkerMetrics] = {}
+        for url in worker_urls:
+            self.worker_realtime_metrics[url] = WorkerMetrics(
+                worker_id=url,
+                gpu_flops_total=180.0,
+                kv_cache_free_gb=32.0,
+                prefill_queue_len=0,
+                decode_queue_len=0,
+                wait_prefill_queue_len=0,
+                ttft_ms=500.0,
+                tpot_ms=40.0
+            )
+        # ==========================================================================
 
     def next_worker(self) -> str:
         """普通轮询：获取下一个健康worker"""
@@ -164,6 +203,56 @@ class RouterState:
             self.user_to_worker[user_id] = new_worker
             print(f"[Router] 新用户绑定: {user_id} -> {new_worker}")
             return new_worker
+        
+        
+    # ===================== 新增：智能选节点 + 全量限流校验统一入口 =====================
+    async def select_available_worker(self, user_id: str, expect_token_num: int) -> str:
+        """
+        整合流程：
+        1. 筛选SLO健康节点
+        2. 按用户粘性优先调度
+        3. 计算节点负载分数
+        4. 执行早期拒绝：用户Token超限/用户QPS超限/全局QPS超限/黑名单/节点高负载
+        """
+        # 取出所有健康节点实时指标
+        all_health_metrics = [
+            self.worker_realtime_metrics[w]
+            for w in self.healthy_workers
+            if w in self.worker_realtime_metrics
+        ]
+        if not all_health_metrics:
+            raise HTTPException(status_code=503, detail="暂无可用推理节点")
+
+        # 过滤仅保留正常+警告状态节点，封禁节点直接剔除
+        valid_workers = self.slo_enforcer.get_healthy_workers(all_health_metrics)
+        if not valid_workers:
+            raise HTTPException(status_code=503, detail="所有节点均已触发SLO限流")
+
+        # 使用粘性策略选择目标节点
+        target_worker = self.route_manager.select_worker(
+            policy=RoutePolicy.USER_STICKY,
+            worker_metrics_list=valid_workers,
+            user_id=user_id
+        )
+        if not target_worker:
+            raise HTTPException(status_code=503, detail="节点调度失败")
+
+        # 获取选中节点负载分数
+        load_score = self.load_predictor.calc_node_score(self.worker_realtime_metrics[target_worker])
+
+        # ========== 核心限流校验：全部走用户维度控制 ==========
+        is_reject, reject_reason = self.early_rejector.should_reject(
+            user_id=user_id,
+            token_count=expect_token_num,
+            worker_load_score=load_score
+        )
+        if is_reject:
+            raise HTTPException(status_code=429, detail=f"请求受限：{reject_reason}")
+
+        # 绑定用户与会话节点
+        self.route_manager.bind_user_worker(user_id, target_worker)
+        return target_worker
+    # =================================================================================
 
     async def record(self, url: str, latency_ms: float):
         """记录普通请求（非流式）"""
@@ -247,12 +336,29 @@ async def health_check_loop(interval: int = 5):
                 try:
                     async with session.get(f"{url}/health") as resp:
                         if resp.status == 200:
+                            # 拉取worker上报的7维实时负载指标
+                            try:
+                                worker_data = await resp.json()
+                                state.worker_realtime_metrics[url] = WorkerMetrics(
+                                    worker_id=url,
+                                    gpu_flops_total=worker_data.get("gpu_flops_total", 180.0),
+                                    kv_cache_free_gb=worker_data.get("kv_cache_free_gb", 32.0),
+                                    prefill_queue_len=worker_data.get("prefill_queue_len", 0),
+                                    decode_queue_len=worker_data.get("decode_queue_len", 0),
+                                    wait_prefill_queue_len=worker_data.get("wait_prefill_queue_len", 0),
+                                    ttft_ms=worker_data.get("ttft_ms", 500.0),
+                                    tpot_ms=worker_data.get("tpot_ms", 40.0)
+                                )
+                            except Exception:
+                                pass
                             state.mark_healthy(url)
                         else:
                             state.mark_unhealthy(url)
                 except Exception:
                     state.mark_unhealthy(url)
             await asyncio.sleep(interval)
+            # 定时清理过期QPS统计与无效用户Token记录，防止内存溢出
+            state.early_rejector.clean_expired_qps()
 
 @app.on_event("startup")
 async def startup():
@@ -321,7 +427,19 @@ async def openai_chat_completions(request: Request):
 
     body = await request.json()
     user_id = body.get("user") or body.get("session_id") or request.client.host or "anonymous"
+    # 取请求内最大生成长度作为预估Token消耗
+    pre_estimate_tokens = body.get("max_tokens", 256)
+    
     worker_url = await state.get_worker_for_user(user_id)
+    
+    # ================== 新加 ==================
+    is_new = body.get("is_new_session", False)
+    if is_new:
+        state.route_manager.unbind_user_worker(user_id)
+    # ===========================================
+    
+    # 统一经过：粘性调度 + SLO过滤 + 用户Token/QPS/全局QPS限流
+    worker_url = await state.select_available_worker(user_id, pre_estimate_tokens)
 
     # 计时
     start_all = time.time()
