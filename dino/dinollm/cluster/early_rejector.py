@@ -18,8 +18,8 @@ class PredictiveEarlyRejector:
         self,
         max_global_qps: int = 100,
         max_user_qps: int = 10,
-        max_user_token_quota: int = 1_000_000,  # 现在是：每个用户最大token
-        high_load_score_threshold: float = 0.75
+        max_user_token_quota: int = 100000000,  # 现在是：每个用户最大token
+        high_load_score_threshold: float = 1
     ):
         # 配置
         self.high_load_score_threshold = high_load_score_threshold

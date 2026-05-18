@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 class CacheManager:
     def __init__(
         self,
+        cache_per_page: int,     # 每页缓存需要多少显存
         num_pages: int,    # 总共有多少个显存页
         page_size: int,    # 每页存多少个 token
         page_table: torch.Tensor,  # 页表：请求ID → 显存位置
@@ -34,6 +35,7 @@ class CacheManager:
         self.num_pages = num_pages
         self.page_table = page_table
         self.page_size = page_size
+        self.cache_per_page = cache_per_page
 
     def match_req(self, req: PendingReq) -> MatchResult:
         input_len = req.input_len
@@ -43,6 +45,16 @@ class CacheManager:
     @property
     def available_size(self) -> int:
         return self.prefix_cache.size_info.evictable_size + len(self.free_slots) * self.page_size
+    
+    # ==========================
+    # 🔥 新加：空闲显存 GB
+    # ==========================
+    @property
+    def free_pages_gb(self) -> float:
+        gb = self.available_size * self.cache_per_page / (1024 ** 3)
+        return round(gb, 2)
+
+        
 
     def lock(self, handle: BaseCacheHandle) -> None:
         self.prefix_cache.lock_handle(handle, unlock=False)

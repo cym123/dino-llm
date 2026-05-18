@@ -38,6 +38,8 @@ dependencies = [
     "quack-kernels",
     "aiohttp>=3.9.0",
     "prometheus-client",
+    "grpcio",
+    "grpcio-tools",
 ]
 
 

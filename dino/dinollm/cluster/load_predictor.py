@@ -2,6 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
+from dinollm.utils import init_logger
+
+
+
+logger = init_logger(__name__)
+
 
 @dataclass
 class WorkerMetrics:
@@ -76,6 +82,9 @@ class WorkerLoadPredictor:
         if not worker_list:
             raise RuntimeError("无可用推理工作节点")
         worker_list.sort(key=self.calc_node_score)
+        
+
+        logger.info(f"选定最优节点: {worker_list[0].worker_id} | score={self.calc_node_score(worker_list[0])}")
         return worker_list[0].worker_id
 
     def get_all_score_map(self, worker_list: List[WorkerMetrics]) -> dict[str, float]:

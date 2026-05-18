@@ -45,6 +45,15 @@ from .slo_enforcer import SLOEnforcer
 from .route_strategy import RouteStrategyManager, RoutePolicy
 
 
+from dinollm.utils import init_logger
+
+from .router_grpc import start_grpc_server
+
+
+logger = init_logger(__name__,"router")
+
+
+
 
 # 1. 请求总数计数器（按worker节点 + 接口类型分类）
 REQUEST_TOTAL = Counter(
@@ -336,21 +345,21 @@ async def health_check_loop(interval: int = 5):
                 try:
                     async with session.get(f"{url}/health") as resp:
                         if resp.status == 200:
-                            # 拉取worker上报的7维实时负载指标
-                            try:
-                                worker_data = await resp.json()
-                                state.worker_realtime_metrics[url] = WorkerMetrics(
-                                    worker_id=url,
-                                    gpu_flops_total=worker_data.get("gpu_flops_total", 180.0),
-                                    kv_cache_free_gb=worker_data.get("kv_cache_free_gb", 32.0),
-                                    prefill_queue_len=worker_data.get("prefill_queue_len", 0),
-                                    decode_queue_len=worker_data.get("decode_queue_len", 0),
-                                    wait_prefill_queue_len=worker_data.get("wait_prefill_queue_len", 0),
-                                    ttft_ms=worker_data.get("ttft_ms", 500.0),
-                                    tpot_ms=worker_data.get("tpot_ms", 40.0)
-                                )
-                            except Exception:
-                                pass
+                            # # 拉取worker上报的7维实时负载指标
+                            # try:
+                            #     worker_data = await resp.json()
+                            #     state.worker_realtime_metrics[url] = WorkerMetrics(
+                            #         worker_id=url,
+                            #         gpu_flops_total=worker_data.get("gpu_flops_total", 180.0),
+                            #         kv_cache_free_gb=worker_data.get("kv_cache_free_gb", 32.0),
+                            #         prefill_queue_len=worker_data.get("prefill_queue_len", 0),
+                            #         decode_queue_len=worker_data.get("decode_queue_len", 0),
+                            #         wait_prefill_queue_len=worker_data.get("wait_prefill_queue_len", 0),
+                            #         ttft_ms=worker_data.get("ttft_ms", 500.0),
+                            #         tpot_ms=worker_data.get("tpot_ms", 40.0)
+                            #     )
+                            # except Exception:
+                            #     pass
                             state.mark_healthy(url)
                         else:
                             state.mark_unhealthy(url)
@@ -365,6 +374,7 @@ async def startup():
     """服务启动时自动执行：启动健康检查任务"""
     asyncio.create_task(health_check_loop())
     print(f"[Router] 启动成功！工作节点: {state.all_workers}")
+    asyncio.create_task(start_grpc_server(state))
 
 @app.get("/health")
 async def health():
@@ -430,11 +440,12 @@ async def openai_chat_completions(request: Request):
     # 取请求内最大生成长度作为预估Token消耗
     pre_estimate_tokens = body.get("max_tokens", 256)
     
-    worker_url = await state.get_worker_for_user(user_id)
+    # worker_url = await state.get_worker_for_user(user_id)
     
     # ================== 新加 ==================
     is_new = body.get("is_new_session", False)
     if is_new:
+        logger.info(f"新会话请求，清除用户绑定: {user_id}")
         state.route_manager.unbind_user_worker(user_id)
     # ===========================================
     

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package worker;
+
+// worker 实时推理指标
+message WorkerMetricsRequest {
+  string worker_id = 1;
+  float gpu_flops_total = 2;
+  float kv_cache_free_gb = 3;
+  int32 prefill_queue_len = 4;
+  int32 decode_queue_len = 5;
+  int32 wait_prefill_queue_len = 6;
+  float ttft_ms = 7;
+  float tpot_ms = 8;
+}
+
+// 健康响应
+message HealthResponse {
+  int32 code = 1;
+  string msg = 2;
+}
+
+// gRPC 服务：worker 主动上报指标
+service WorkerMetricService {
+  rpc ReportMetrics(WorkerMetricsRequest) returns (HealthResponse);
+}

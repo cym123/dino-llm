@@ -25,10 +25,67 @@ from .table import TableManager       # 页表槽位管理器
 
 if TYPE_CHECKING:
     from dinollm.engine import BatchSamplingArgs, ForwardOutput
+    
+# 自动生成的 gRPC 文件
+# gRPC 自动生成
+from dinollm.proto import worker_metrics_pb2
+from dinollm.proto import worker_metrics_pb2_grpc
+
+# 你自己的 dataclass
+from dinollm.cluster.load_predictor import WorkerMetrics
+
+# ============================
+# gRPC 上报客户端（集成到 Scheduler）
+# ============================
+import grpc
+import asyncio
+import threading
 
 logger = init_logger(__name__)
 
 Indice2D: TypeAlias = Tuple[torch.Tensor, torch.Tensor]
+
+# Router gRPC 地址
+ROUTER_GRPC_ADDR = "127.0.0.1:50051"
+
+# =============================================================================
+# 🔥 终极通用版：传入 WorkerMetrics 对象，无任何硬编码
+# =============================================================================
+# 后台上报协程
+async def _report_worker_metrics_async(worker_id: str, get_metrics_func):
+    async with grpc.aio.insecure_channel(ROUTER_GRPC_ADDR) as channel:
+        stub = worker_metrics_pb2_grpc.WorkerMetricServiceStub(channel)
+        logger.info(f"✅ gRPC 上报客户端已启动，目标 Router: {ROUTER_GRPC_ADDR}")
+
+        while True:
+            try:
+                # 获取当前实时指标
+                m = get_metrics_func()
+                req = worker_metrics_pb2.WorkerMetricsRequest(
+                    worker_id=worker_id,
+                    gpu_flops_total=m.gpu_flops_total,
+                    kv_cache_free_gb=m.kv_cache_free_gb,
+                    prefill_queue_len=m.prefill_queue_len,
+                    decode_queue_len=m.decode_queue_len,
+                    wait_prefill_queue_len=m.wait_prefill_queue_len,
+                    ttft_ms=m.ttft_ms,
+                    tpot_ms=m.tpot_ms,
+                )
+                logger.debug(f"📤 正在上报指标 | worker={worker_id}")
+                res = await stub.ReportMetrics(req)
+                logger.info(f"📥 上报成功 | worker={worker_id}, code={res.code}, msg={res.msg}")
+            except Exception as e:
+                logger.error(f"❌ 上报失败 | worker={worker_id}")
+                logger.error(f"❌ 上报失败 | worker={worker_id}, 错误={str(e)}")
+            await asyncio.sleep(5)
+
+# 启动后台上报线程（不阻塞推理）
+def start_worker_metrics_report(worker_id: str, get_metrics_func):
+    def run():
+        asyncio.run(_report_worker_metrics_async(worker_id, get_metrics_func))
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    logger.info(f"🚀 后台指标上报线程已启动 | worker={worker_id}")
 
 
 
@@ -59,6 +116,7 @@ class Scheduler(SchedulerIOMixin):
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
 
         self.cache_manager = CacheManager(
+            self.engine.cache_per_page,
             self.engine.num_pages,    # 总页数
             config.page_size,         # 每页token数
             self.engine.page_table,   # 全局页表
@@ -78,6 +136,24 @@ class Scheduler(SchedulerIOMixin):
         self.eos_token_id = self.tokenizer.eos_token_id
         self.token_pool = self.table_manager.token_pool
         self.prefill_budget = config.max_extend_tokens
+        
+        self.worker_id = f"{config.server_host}:{config.server_port}" 
+        def get_metrics():
+            
+            
+            return WorkerMetrics(
+                worker_id=self.worker_id,
+                gpu_flops_total=180.0,                          # 你可以从engine拿
+                kv_cache_free_gb=self.cache_manager.free_pages_gb,  # 从cache拿
+                prefill_queue_len=0,
+                decode_queue_len=len(self.decode_manager.running_reqs),
+                wait_prefill_queue_len=len(self.prefill_manager.pending_list),
+                ttft_ms=200,
+                tpot_ms=50,
+            )
+        start_worker_metrics_report(self.worker_id, get_metrics)
+
+        
 
         super().__init__(config, self.engine.tp_cpu_group)
 

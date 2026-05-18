@@ -56,8 +56,21 @@ class Engine:
         self.model.load_state_dict(self._load_weight_state_dict(config))
 
         # ======================= KV Cache 初始化 =======================
+        
+        self.cache_per_page = (
+            2  # key + value
+            * config.model_config.head_dim
+            * div_even(config.model_config.num_kv_heads, config.tp_info.size, allow_replicate=True)
+            * config.page_size
+            * self.dtype.itemsize
+            * config.model_config.num_layers
+        )
+        
         self.num_pages = self._determine_num_pages(init_free_memory, config)
         num_tokens = self.num_pages * config.page_size
+        
+     
+        
         self.ctx.kv_cache = self.kv_cache = create_kvcache_pool(
             model_config=config.model_config,
             num_pages=self.num_pages + 1,  # +1 虚拟页

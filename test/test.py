@@ -15,7 +15,9 @@ payload = {
     ],
     "temperature": 0.7,
     "max_tokens": 512,
-    "stream": True
+    "stream": True,
+    "user_id": "test_user_123",
+    "is_new_session": False
 }
 
 response = requests.post(url, json=payload, stream=True)

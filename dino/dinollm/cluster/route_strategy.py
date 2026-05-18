@@ -3,6 +3,12 @@ from enum import Enum
 from typing import List, Optional, Dict
 from .load_predictor import WorkerMetrics, WorkerLoadPredictor
 
+from dinollm.utils import init_logger
+
+
+
+logger = init_logger(__name__)
+
 
 class RoutePolicy(Enum):
     """路由调度策略（顺序已调整）"""
@@ -61,6 +67,7 @@ class RouteStrategyManager:
             if user_id:
                 bound_wid = self.get_sticky_bind_worker(user_id)
                 if bound_wid and bound_wid in available:
+                    logger.info(f"用户 {user_id} 粘性绑定节点 {bound_wid} 可用，继续使用")
                     return bound_wid
 
             # 无绑定/节点不可用 → 自动降级负载最优
