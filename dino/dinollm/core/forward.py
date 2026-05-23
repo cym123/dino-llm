@@ -34,6 +34,8 @@ class Req:
     uid: int
     sampling_params: SamplingParams
     cache_handle: BaseCacheHandle
+    
+    priority: int = 0
 
     def __post_init__(self) -> None:
         assert self.input_ids.is_cpu

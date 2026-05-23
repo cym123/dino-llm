@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, Tuple
 import torch
 from dinollm.core import Batch, Req
 from dinollm.utils import init_logger
+import time
 
 from .utils import PendingReq
 
@@ -168,6 +169,15 @@ class PrefillManager:
 
     # 添加一个用户请求到等待队列
     def add_one_req(self, req: UserMsg) -> None:
+            # 携带优先级，无则默认0
+        prio = getattr(req, "priority", 0)
+        pending = PendingReq(
+            uid=req.uid,
+            input_ids=req.input_ids,
+            sampling_params=req.sampling_params,
+            priority=prio,
+            arrive_time=time.time()
+        )
         self.pending_list.append(PendingReq(req.uid, req.input_ids, req.sampling_params))
 
     # ------------------------------

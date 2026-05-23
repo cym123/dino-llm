@@ -75,8 +75,9 @@ async def _report_worker_metrics_async(worker_id: str, get_metrics_func):
                 res = await stub.ReportMetrics(req)
                 logger.info(f"📥 上报成功 | worker={worker_id}, code={res.code}, msg={res.msg}")
             except Exception as e:
-                logger.error(f"❌ 上报失败 | worker={worker_id}")
-                logger.error(f"❌ 上报失败 | worker={worker_id}, 错误={str(e)}")
+                pass
+                # logger.error(f"❌ 上报失败 | worker={worker_id}")
+                # logger.error(f"❌ 上报失败 | worker={worker_id}, 错误={str(e)}")
             await asyncio.sleep(5)
 
 # 启动后台上报线程（不阻塞推理）
@@ -136,6 +137,7 @@ class Scheduler(SchedulerIOMixin):
         self.eos_token_id = self.tokenizer.eos_token_id
         self.token_pool = self.table_manager.token_pool
         self.prefill_budget = config.max_extend_tokens
+        self.schedule_strategy = config.schedule_strategy  # fcfs / priority
         
         self.worker_id = f"{config.server_host}:{config.server_port}" 
         def get_metrics():
@@ -311,6 +313,17 @@ class Scheduler(SchedulerIOMixin):
 
     # 调度决策：优先调度prefill批次，没有再调度decode批次
     def _schedule_next_batch(self) -> ForwardInput | None:
+        
+        pending_queue = self.prefill_manager.pending_list
+        # 根据策略重排等待队列
+        if pending_queue:
+            if self.schedule_strategy == "priority":
+                # 排序权重：有分块请求 > 优先级 > 到达时间
+                pending_queue.sort(
+                key=lambda x: (0 if x.chunked_req is not None else 1, -x.priority, x.arrive_time)
+                )
+        # fcfs无需改动，原生入队顺序
+        
         # 先尝试拿prefill批次，拿不到再拿decode批次
         batch = (
             self.prefill_manager.schedule_next_batch(self.prefill_budget)

@@ -17,7 +17,8 @@ payload = {
     "max_tokens": 512,
     "stream": True,
     "user_id": "test_user_123",
-    "is_new_session": False
+    "is_new_session": False,
+    "priority":0
 }
 
 response = requests.post(url, json=payload, stream=True)

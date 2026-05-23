@@ -20,6 +20,9 @@ class SchedulerConfig(EngineConfig):
 
 
     offline_mode: bool = False
+    
+    # 调度策略 fcfs / priority
+    schedule_strategy: str = "fcfs"
 
 
     _unique_suffix: str = field(default_factory=_get_pid_suffix)

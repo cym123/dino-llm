@@ -40,6 +40,7 @@ class TokenizeMsg(BaseTokenizerMsg):
     uid: int
     text: str | List[Dict[str, str]]
     sampling_params: SamplingParams
+    priority: int = 0
 
 
 

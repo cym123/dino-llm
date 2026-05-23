@@ -20,6 +20,9 @@ class PendingReq:
     input_ids: torch.Tensor   # 输入的token序列（CPU张量）
     sampling_params: SamplingParams  # 生成参数
     chunked_req: ChunkedReq | None = None  # 长文本分块预填充对象
+    
+    priority: int = 0        # 优先级，数值越大越高
+    arrive_time: float = 0.0 # 请求到达时间
 
     @property
     def input_len(self) -> int:

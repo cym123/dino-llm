@@ -40,6 +40,7 @@ class UserMsg(BaseBackendMsg):
     uid: int
     input_ids: torch.Tensor
     sampling_params: SamplingParams
+    priority: int = 0
 
 
 @dataclass

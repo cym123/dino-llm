@@ -213,6 +213,13 @@ def parse_args(args: List[str]) -> ServerArgs:
         choices=SUPPORTED_CACHE_MANAGER.supported_names(),
         help="KV缓存管理策略",
     )
+    
+    parser.add_argument(
+        "--schedule-strategy",
+        type=str, default=ServerArgs.schedule_strategy,
+        choices=["fcfs", "priority"],
+        help="scheduling strategy for prefill",
+    )
 
     # MoE 后端
     parser.add_argument(
