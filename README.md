@@ -19,11 +19,10 @@
 - 张量并行：无缝适配多卡模型分片推理，实现性能横向扩容
 - 高速 CUDA 内核：深度融合闪注意力、FlashInfer 等优化算子，充分释放 GPU 算力
 
-## Quick Start
+## 快速开始
 
 
-```bash
-# Create isolated virtual environment (Python 3.10+ required)
+
 uv venv --python=3.12
 source .venv/bin/activate
 uv pip install -e .
