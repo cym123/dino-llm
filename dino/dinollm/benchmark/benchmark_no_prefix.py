@@ -9,8 +9,9 @@ from typing import List, Dict
 # ===================== 配置 =====================
 API_URL = "http://localhost:2000/v1/chat/completions"
 API_KEY = "dummy"
-CONCURRENCY = 8
+CONCURRENCY = 256
 TIMEOUT = 60
+TEST_REQUESTS = 256
 # ================================================
 
 # 100 条完全不同的提示词，无公共前缀 → 绝对不触发 PrefixCache
@@ -114,12 +115,168 @@ PROMPT_LIST = [
     "请详细讲解云原生AI，弹性伸缩、自动扩缩容、负载均衡、故障自愈、灰度发布",
     "请详细介绍大模型应用开发，提示词、函数调用、工具使用、工作流、Agent智能体",
     "请详细讲解智能体技术，规划、记忆、工具、反思、多智能体协作、环境交互",
-    "请详细介绍下ai infra岗位需要技能"
+    "请详细介绍下ai infra岗位需要技能",
+    "智能体规划拆解复杂任务层级，按步骤推进目标有序落地执行",
+    "长短记忆分类存储交互信息，调取历史数据支撑实时决策判断",
+    "智能体灵活调用各类工具接口，完成计算检索查询实操类任务",
+    "执行完毕开启自我反思复盘，修正行为缺陷优化后续处事逻辑",
+    "多智能体分工配合信息互通，协作联动共同处理复合型难题",
+    "实时感知外部环境动态变化，自主调整行动策略适配场景需求",
+    "优先级规划梳理任务顺序，精简执行流程降低资源无谓消耗",
+    "短时记忆留存临时对话内容，保障交互顺畅应答节奏不中断",
+    "拓展工具体系拓宽能力范围，独立应对不同类型实际业务场景",
+    "定期反思过往决策得失，沉淀经验稳步提升智能判断水准",
+    "全局统筹规划行动路线，规避执行风险保障任务稳步推进",
+    "长效记忆沉淀行为数据，依托过往经历优化当下选择判断",
+    "按需匹配专业工具模块，高效处理图文数据与运算类工作",
+    "深度反思行动疏漏问题，迭代算法模型强化智能响应能力",
+    "多智能体信息共享互通，划分职责协同完成大规模作业",
+    "敏锐捕捉环境细微变动，即时调整行为模式适配外界变化",
+    "动态规划适配突发状况，灵活变通方案保障任务正常推进",
+    "记忆检索快速调取资料，依托存量信息缩短决策耗时周期",
+    "跨界工具组合搭配使用，一站式解决多元复杂现实问题",
+    "复盘全过程总结优缺点，持续迭代升级智能体核心性能",
+    "群组智能体协同调度，相互配合弥补个体能力存在短板",
+    "沉浸式感知周遭环境，依据场景特征制定适配行动方案",
+    "精细化拆分规划目标，细化执行步骤提升整体作业效率",
+    "记忆分层管理存取数据，精准筛选有效信息辅助逻辑推理",
+    "智能体自主发起工具调用，自主研判场景选用适配功能",
+    "对照执行结果反向反思，找准不足优化后续行动策略",
+    "跨智能体协商沟通协作，统一目标步调合力攻克难点",
+    "主动探测环境状态参数，依据实时数据调整运行模式",
+    "远期规划锁定最终方向，分步拆解小目标稳步趋近结果",
+    "关联记忆串联相关内容，整合碎片化信息形成完整依据",
+    "专用工具赋能专项任务，凭借功能优势高效处理对应事务",
+    "阶段性反思行为成效，及时调整思路避免偏离既定方向",
+    "多主体协同分配工作，各司其职衔接顺畅提升整体效能",
+    "持续监测环境演变趋势，预判变化提前做好应对预备举措",
+    "智能规划规避无效动作，合理分配算力资源提升运转效率",
+    "记忆归档留存交互轨迹，追溯过往过程分析决策合理性",
+    "集成多样工具拓展本领，全方位满足各类场景使用需求",
+    "深度反思决策思维漏洞，优化思考模式减少判断失误情况",
+    "联盟智能体协同联动，互通资源优势互补化解棘手问题",
+    "动态适配环境时空变化，顺势调整行动方式契合现场条件",
+    "逆向规划倒推执行路径，反向梳理环节保障任务闭环落地",
+    "联想记忆挖掘信息关联，挖掘隐藏线索助力问题分析研判",
+    "智能调度工具组合功能，搭配操作完成综合性复杂事务",
+    "事后反思梳理成败缘由，汲取经验教训优化后续处置方式",
+    "分布式多智能体协作，区域分工联动协作完成全域任务",
+    "立体感知多维环境信息，综合研判现状制定合理行动方案",
+    "弹性规划适配任务难度，灵活调整节奏适配不同作业体量",
+    "记忆压缩精简核心内容，剔除冗余信息加快检索响应速度",
+    "智能识别场景匹配工具，精准选用功能适配当下处理诉求",
+    "常态化反思迭代能力，不断修正行为趋近最优执行效果",
+    "异构智能体配合协作，差异化能力互补覆盖全业务流程",
+    "实时反馈环境交互结果，依据反馈内容优化自身运行状态",
+    "策略规划博弈应对场景，权衡利弊选择最优行动实施方案",
+    "记忆溯源还原交互细节，还原过程原貌辅助问题复盘总结",
+    "自动化调用内置工具，无需人工干预自主完成常规作业",
+    "批判性反思固有思维，打破局限思路提升决策创新程度",
+    "集群智能体统一调度，统一指令步调一致协同推进项目",
+    "主动交互环境获取信息，采集基础数据支撑后续分析运算",
+    "模块化规划拆分大任务，独立模块作业降低执行出错概率",
+    "记忆加密保护交互数据，安全存储信息规避内容泄露风险",
+    "工具权限分级管控使用，规范调用流程保障操作安全稳定",
+    "对比反思不同执行方案，择优选用模式提升任务完成质量",
+    "层级化多智能体管理，上下级联动统筹推进整体工作进度",
+    "环境边界感知规避风险，远离危险区域保障智能体运行安全",
+    "预判式规划提前布局，结合趋势动向提前安排后续工作",
+    "记忆标签分类规整数据，快速定位所需信息缩短查找时间",
+    "轻量化工具快速调用，简易操作高效处理日常基础事务",
+    "自我反思优化交互话术，调整表达逻辑提升沟通流畅程度",
+    "对等智能体平等协作，互相商议探讨共同敲定处置方案",
+    "环境要素拆解分析研判，抓住核心条件制定对应应对举措",
+    "约束规划划定行动边界，恪守规则范围合规开展各项作业",
+    "记忆遗忘机制清理废数据，释放存储空间保障运转流畅度",
+    "重型工具承载复杂运算，依靠强大算力处理高阶分析任务",
+    "全局反思统筹整体流程，梳理衔接卡点优化整体运转链路",
+    "跨领域智能体跨界协作，融合多类技术解决跨界疑难问题",
+    "环境态势评估预判走向，提前预估变化提早筹备应对手段",
+    "迭代规划逐步优化方案，依照执行效果持续微调行动步骤",
+    "记忆联动跨时段调取内容，串联前后信息形成完整逻辑链",
+    "工具自定义适配专属需求，按需调整参数贴合实际使用场景",
+    "细节反思排查微小疏漏，补齐细节短板完善整体执行效果",
+    "分布式决策多智能体商议，汇集多方意见敲定最终执行方案",
+    "环境干扰过滤剔除无效信息，保留有效内容支撑精准判断",
+    "协同规划多方商定路线，凝聚共识确定统一任务推进方向",
+    "记忆快照留存关键节点，定格重要时刻方便后续复盘查阅",
+    "工具协同联动配合运作，多项功能同步发力加速任务办结",
+    "归因反思剖析问题根源，直击核心症结从本源解决各类问题",
+    "动态组网多智能体集群，灵活组合队伍适配不同作业规模",
+    "环境资源勘测采集素材，整合可用资源最大化发挥利用价值",
+    "风险规划预判潜在隐患，提前制定预案规避各类突发意外",
+    "记忆迁移复用过往经验，借鉴相似场景做法简化当下处理",
+    "智能工具自主优化参数，自适应调整配置适配运行工况",
+    "成长反思总结进阶经验，积累阅历持续拔高智能综合水准",
+    "区域协同智能体分片作业，分区管控高效覆盖大范围场景",
+    "环境氛围感知调整交互语气，贴合场景氛围开展顺畅沟通",
+    "目标规划锚定核心诉求，舍弃无关内容聚焦关键任务要点",
+    "记忆备份保障数据安全，多重留存方式防止重要信息丢失",
+    "便携工具便捷随时调用，随时随地响应临时突发处理需求",
+    "偏差反思修正认知误区，扭转错误判断回归客观事实本身",
+    "任务委派多智能体分工履职，专人专项负责保障事务高效推进",
+    "环境地形适配调整移动轨迹，贴合空间形态平稳完成位移动作",
+    "资源规划合理调配可用物资，科学分配物料保障作业持续运转",
+    "记忆融合整合多源信息，汇总各方数据形成全面参考依据",
+    "开源工具拓展功能储备，吸纳多元能力丰富自身处理范畴",
+    "复盘反思梳理全程得失，总结优势不足推动能力稳步进阶",
+    "消息互通多智能体实时传讯，即时同步动态保持信息步调统一",
+    "环境温度气压等参数感知，依据物理条件调整自身运行状态",
+    "时序规划依照时间节点推进，准时完成各阶段既定工作目标",
+    "记忆筛选甄别有效讯息，剔除虚假内容筑牢判断真实基础",
+    "仿真工具模拟场景推演，预判执行效果提前优化行动方案",
+    "认知反思刷新固有认知，接纳全新思路拓宽思考判断眼界",
+    "等级协作智能体层级配合，逐级传达指令逐层落实工作内容",
+    "环境声响影像多模态感知，多维度捕捉信息全面认知外界情况",
+    "成本规划严控资源消耗额度，节约损耗实现高效低碳运行模式",
+    "记忆索引搭建检索体系，建立查询目录极速定位目标信息",
+    "办公工具助力文案整理编撰，规范格式内容完成文书类工作",
+    "行为反思规范自身举动，优化行事方式塑造稳定作业风格",
+    "联盟组网多智能体抱团协作，凝聚集体力量攻克超高难度任务",
+    "环境气流光影细微变化捕捉，敏锐察觉异动及时做出对应反应",
+    "预案规划备好多种处置方案，不同状况切换对应策略灵活应对",
+    "记忆时序排序梳理先后内容，依照时间脉络理清事件发展过程",
+    "测绘工具勘测空间位置数据，精准定位坐标掌握环境分布情况",
+    "价值反思衡量行动实际意义，舍弃无用行为聚焦高价值事务",
+    "互助协作智能体彼此帮扶，弥补个体短板共同提升作业成效",
+    "环境人群氛围感知适配交流，贴合群体状态调整沟通表达模式",
+    "路径规划测算最优行进线路，缩减行进距离节省运转时间成本",
+    "记忆快照对比前后信息差异，对照变化内容分析事态演变走向",
+    "统计工具核算汇总各类数据，梳理数值规律提炼有效分析结论",
+    "决策反思审视选择合理程度，复盘抉择过程优化后续判断思维",
+    "跨境域智能体信息互通共享，打破领域壁垒融合多元技术思路",
+    "环境路况阻碍识别规避绕行，避开障碍物保障行进过程安全顺畅",
+    "产能规划匹配任务处理体量，调整作业速率适配当下工作负荷",
+    "记忆脱敏处理隐私类信息，合规加工内容规避隐私泄露问题",
+    "编程工具编写调试功能代码，搭建程序模块实现定制化业务功能",
+    "效果反思对照预期查验成果，比对标准差距针对性优化改进",
+    "梯队协作智能体前后衔接配合，首尾呼应连贯完成整套作业流程",
+    "环境昼夜明暗光线变化适应，调整视觉感知模式适配光照条件",
+    "弹性目标规划预留调整空间，应对变数情况灵活改动任务指标",
+    "记忆聚类归纳同类信息内容，整合相似条目简化信息管理流程",
+    "测绘检测工具核查实体状态，核验物件参数判断实际完好程度",
+    "思维反思重构思考逻辑框架，理顺推理脉络提升分析判断精度",
+    "联动组网多智能体跨区配合，跨越空间距离协同处置关联事务",
+    "环境酸碱湿度理化特性感知，适配环境特质保障设备稳定运作",
+    "极简规划删减冗余执行环节，压缩流程步骤提升整体运转速率",
+    "记忆时效判定信息有效期限，过期内容清理保证信息参考价值",
+    "影音工具剪辑处理音视频素材，修整画面音效产出合规成品内容",
+    "协作反思梳理配合衔接问题，优化联动方式提升团队协作默契",
+    "子母智能体从属配合开展工作，上级统筹把控下级落地执行事务",
+    "环境人群疏密状态实时感知，依据人流密度调整交互行动尺度",
+    "博弈规划权衡多方利益关系，平衡各方诉求拟定折中处置方案",
+    "记忆拼接整合碎片化资讯，拼凑完整全貌还原事件真实原貌",
+    "计算工具高速演算复杂公式，精准得出数值结果支撑数据分析",
+    "成长反思对标行业优秀水准，找寻自身差距朝着标杆看齐进步",
+    "轮值协作智能体交替值守作业，轮流履职保障服务不间断运行",
+    "环境季节气候更迭状态适配，顺应气候特征调整日常行动模式",
+    "闭环规划首尾衔接形成完整链路，全程把控流程保障任务圆满收官",
+    "记忆溯源追踪信息来源出处，核实内容真伪确保参考资料可靠"
 ]
 
 print(f"提示词总数: {len(PROMPT_LIST)}")
 
-assert len(PROMPT_LIST) == 100
+assert len(PROMPT_LIST) == 256
 
 
 class BenchMetrics:
@@ -128,32 +285,46 @@ class BenchMetrics:
         self.total_lat_list: List[float] = []
         self.tpot_list: List[float] = []
         self.total_tokens = 0
+        self.total_requests = 0
 
     def add(self, ttft: float, total_lat: float, tokens: int):
         self.ttft_list.append(ttft)
         self.total_lat_list.append(total_lat)
         self.total_tokens += tokens
+        self.total_requests += 1
 
         if tokens >= 2:
             gen_time = total_lat - ttft
             tpot = gen_time / (tokens - 1)
             self.tpot_list.append(tpot)
 
-    def calculate(self):
+    def calculate(self, total_time: float):
         def p50(arr): return sorted(arr)[int(len(arr) * 0.5)] if arr else 0.0
+        def p90(arr): return sorted(arr)[int(len(arr) * 0.9)] if arr else 0.0
+        def p95(arr): return sorted(arr)[int(len(arr) * 0.95)] if arr else 0.0
         def p99(arr): return sorted(arr)[int(len(arr) * 0.99)] if arr else 0.0
 
+        qps = self.total_requests / total_time if total_time > 0 else 0
+        token_throughput = self.total_tokens / total_time if total_time > 0 else 0
+
         return {
-            "requests": len(self.ttft_list),
+            "total_time_sec": round(total_time, 2),
+            "requests": self.total_requests,
             "total_output_tokens": self.total_tokens,
+            "qps": round(qps, 2),
+            "token_throughput": round(token_throughput, 2),
             "ttft_ms": {
                 "avg": round(statistics.mean(self.ttft_list), 2) if self.ttft_list else 0,
                 "p50": round(p50(self.ttft_list), 2),
+                "p90": round(p90(self.ttft_list), 2),
+                "p95": round(p95(self.ttft_list), 2),
                 "p99": round(p99(self.ttft_list), 2),
             },
             "total_latency_ms": {
                 "avg": round(statistics.mean(self.total_lat_list), 2) if self.total_lat_list else 0,
                 "p50": round(p50(self.total_lat_list), 2),
+                "p90": round(p90(self.total_lat_list), 2),
+                "p95": round(p95(self.total_lat_list), 2),
                 "p99": round(p99(self.total_lat_list), 2),
             },
             "tpot_ms": {
@@ -163,21 +334,19 @@ class BenchMetrics:
             }
         }
 
-
 metrics = BenchMetrics()
-
 
 async def run_query(session: aiohttp.ClientSession, prompt: str, user_id: str):
     start = time.perf_counter()
     ttft = None
     token_count = 0
-
+    max_tokens = random.randint(100, 1024)
     payload = {
         "model": "default",
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
         "user": user_id,
-        "max_tokens": 128,
+        "max_tokens": max_tokens,
         "temperature": 0.7,
     }
 
@@ -197,9 +366,8 @@ async def run_query(session: aiohttp.ClientSession, prompt: str, user_id: str):
                     break
 
                 try:
-                    j = json.loads(data)
-                    token_count += 1  # 每一个 chunk = 1 token ✅ 真实精准
-
+                    json.loads(data)
+                    token_count += 1
                     if ttft is None:
                         ttft = (time.perf_counter() - start) * 1000
                 except:
@@ -209,9 +377,8 @@ async def run_query(session: aiohttp.ClientSession, prompt: str, user_id: str):
         return ttft, total_lat, token_count
 
     except Exception as e:
-        print(f"失败: {str(e)[:50]}")
+        print(f"请求失败: {str(e)[:50]}")
         return None, None, 0
-
 
 async def worker(queue: asyncio.Queue):
     async with aiohttp.ClientSession() as s:
@@ -222,28 +389,43 @@ async def worker(queue: asyncio.Queue):
                 metrics.add(t1, t2, tok)
             queue.task_done()
 
-
 async def main():
-    print("=" * 70)
-    print("🔥 纯冷启动压测｜100条独立提示词｜零PrefixCache｜真实Token统计")
-    print("=" * 70)
+    print("=" * 80)
+    print("🔥 LLM 推理基准测试（无缓存冷启动｜真实Token统计｜专业Benchmark）")
+    print("=" * 80)
 
     q = asyncio.Queue()
-    prompts = random.sample(PROMPT_LIST, 100)
+    
+    expanded_prompts = []
+    selected_prompts = random.sample(PROMPT_LIST, TEST_REQUESTS)
+    
+    for s in selected_prompts:
+        # 随机生成 3 到 30 之间的整数（包含 3 和 30）
+        repeat_times = random.randint(2, 29)
+        # 让内容变长，但还是 1 条！
+        long_prompt = s + " " + "全方位剖析技术原理细节，多角度对比优劣差异，完整阐述落地应用要点" * repeat_times
+        expanded_prompts.append(long_prompt)
+        
+    print("\n📏 每条提示词最终长度（字符数）：")
+    for idx, text in enumerate(expanded_prompts):
+        print(f"第 {idx+1} 条长度：{len(text)}")
+    
 
-    for i, p in enumerate(prompts):
-        unique_user = f"cold_user_{time.time_ns()}_{i}"
+    for i, p in enumerate(expanded_prompts):
+        unique_user =f"bench_user_{time.time_ns()}_{i}"
         q.put_nowait((p, unique_user))
 
+    start_all = time.perf_counter()
     tasks = [asyncio.create_task(worker(q)) for _ in range(CONCURRENCY)]
     await q.join()
+    total_time = time.perf_counter() - start_all
+
     for t in tasks:
         t.cancel()
 
-    res = metrics.calculate()
-    print("\n✅ 压测完成！")
+    res = metrics.calculate(total_time)
+    print("\n✅ 测试完成！\n")
     print(json.dumps(res, ensure_ascii=False, indent=2))
-
 
 if __name__ == "__main__":
     asyncio.run(main())

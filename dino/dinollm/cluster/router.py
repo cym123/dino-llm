@@ -229,6 +229,17 @@ class RouterState:
             for w in self.healthy_workers
             if w in self.worker_realtime_metrics
         ]
+        
+        
+        # 特例优化 压测用：如果只有一个健康节点，直接选它（不走后续复杂逻辑）
+        if len(all_health_metrics) == 1:
+            # 只有一个健康节点，直接选它（不走后续复杂逻辑）
+            target_worker = all_health_metrics[0].worker_id
+            logger.info(f"仅有单一健康节点，直接选定: {target_worker}")
+            return target_worker
+        
+        
+        
         if not all_health_metrics:
             raise HTTPException(status_code=503, detail="暂无可用推理节点")
 
